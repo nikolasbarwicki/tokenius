@@ -20,6 +20,6 @@ Strict TypeScript starter built on Bun. Use Bun as the runtime, package manager,
 Add dependencies only with justification — the template is intentionally minimal.
 
 - TypeScript style rules:
-  [docs/TYPESCRIPT.md](./docs/TYPESCRIPT.md)
+  [docs/agents/TYPESCRIPT.md](./docs/TYPESCRIPT.md)
 - Preferred Bun APIs over third-party packages:
-  [docs/BUN_APIS.md](./docs/BUN_APIS.md)
+  [docs/agents/BUN_APIS.md](./docs/BUN_APIS.md)
