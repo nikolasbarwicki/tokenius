@@ -1,13 +1,39 @@
-# bunbase 🧊
+# Tokenius
 
-Strict TypeScript starter optimized for AI-assisted development. Every commit is validated by five parallel checks — linting, formatting, type checking, dead code detection, and tests — so agents (and humans) get instant feedback on every change.
+A lightweight, well-designed coding agent harness. Single-process TypeScript + Bun.
+
+## Architecture
+
+Tokenius is a layered system with a streaming-first, tool-centric design:
+
+```
+CLI / TUI Interface
+Configuration & Project Rules
+Skills
+Session Persistence
+Security
+Agents & Subagents
+Agent Loop
+Tool System
+LLM Provider Abstraction
+```
+
+Key design principles:
+
+- **One loop, many agents** — the agent loop is a single function. Agents are configurations, not code.
+- **Tools are the API** — everything the LLM does goes through a tool.
+- **Streaming-first** — every LLM interaction is a stream.
+- **Security by default** — path validation, command gating, secret protection are built in.
+- **Direct SDK usage** — no Langchain, no AI SDK, no abstractions over abstractions.
+
+See [docs/architecture-v2.md](./docs/architecture-v2.md) for the full technical architecture.
 
 ## Tech Stack
 
 - **Runtime / Package Manager / Test Runner / Bundler:** [Bun](https://bun.sh)
 - **Language:** TypeScript (strictest settings)
-- **Linter:** [oxlint](https://oxc.rs/docs/guide/usage/linter) — correctness, suspicious, pedantic, perf, style
-- **Formatter:** [oxfmt](https://oxc.rs/docs/guide/usage/formatter) — with sorted imports
+- **Linter:** [oxlint](https://oxc.rs/docs/guide/usage/linter)
+- **Formatter:** [oxfmt](https://oxc.rs/docs/guide/usage/formatter)
 - **Dead Code:** [knip](https://knip.dev)
 - **Commit Linting:** [commitlint](https://commitlint.js.org) (Conventional Commits)
 - **Git Hooks:** [lefthook](https://github.com/evilmartians/lefthook)
@@ -37,59 +63,6 @@ bun install
 
 Lefthook runs automatically on every commit:
 
-**pre-commit** (parallel):
+**pre-commit** (parallel): lint, format check, typecheck, tests, knip
 
-- `bun run lint`
-- `bun run format:check`
-- `bun run typecheck`
-- `bun test`
-- `bun run knip`
-
-**commit-msg:**
-
-- Enforces [Conventional Commits](https://www.conventionalcommits.org) via commitlint
-
-## TypeScript Config
-
-Maximum strictness enabled:
-
-- `strict: true`
-- `noUncheckedIndexedAccess` — indexed access returns `T | undefined`
-- `exactOptionalPropertyTypes` — no implicit `undefined` in optional props
-- `noImplicitReturns`, `noImplicitOverride`, `noFallthroughCasesInSwitch`
-- Bundler module resolution with `verbatimModuleSyntax`
-
-## Linter Highlights
-
-- `no-explicit-any` is an **error**
-- `consistent-type-imports` enforced (use `import type`)
-- `no-default-export` warned (except config files)
-- `no-cycle` and `no-self-import` prevent circular dependencies
-- Plugins: typescript, unicorn, import, promise, oxc, node
-
-## Formatter Config
-
-- Print width: 100
-- Double quotes, trailing commas, semicolons
-- Automatic import sorting (builtin > external > internal > relative > type)
-
-## Project Structure
-
-```
-.
-├── src/
-│   ├── index.ts          # Entrypoint
-│   └── index.test.ts     # Tests
-├── .oxlintrc.json        # Linter config
-├── .oxfmtrc.json         # Formatter config
-├── knip.json             # Dead code detection config
-├── lefthook.yml          # Git hooks
-├── commitlint.config.js  # Commit message rules
-├── tsconfig.json         # TypeScript config
-├── .editorconfig         # Editor settings
-└── CLAUDE.md             # AI agent instructions
-```
-
----
-
-Built with [Yapper](https://yapper.to/) by [Nikolas](https://nbarwicki.com)
+**commit-msg:** Enforces [Conventional Commits](https://www.conventionalcommits.org) via commitlint
