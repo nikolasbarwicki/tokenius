@@ -1,0 +1,37 @@
+{
+  "formatter": "language_server",
+  "format_on_save": "on",
+  "lsp": {
+    "oxc": {
+      "settings": {
+        "oxc": {
+          "fmt": {
+            "configPath": ".oxfmtrc.json"
+          }
+        }
+      }
+    }
+  },
+  "languages": {
+    "TypeScript": {
+      "formatter": "language_server",
+      "language_servers": ["oxc", "typescript-language-server"]
+    },
+    "JavaScript": {
+      "formatter": "language_server",
+      "language_servers": ["oxc", "typescript-language-server"]
+    },
+    "TSX": {
+      "formatter": "language_server",
+      "language_servers": ["oxc", "typescript-language-server"]
+    },
+    "JSON": {
+      "formatter": "language_server",
+      "language_servers": ["oxc"]
+    }
+  },
+  "tab_size": 2,
+  "hard_tabs": false,
+  "ensure_final_newline_on_save": true,
+  "remove_trailing_whitespace_on_save": true
+}

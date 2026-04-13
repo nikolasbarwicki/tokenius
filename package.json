@@ -1,0 +1,33 @@
+{
+  "name": "bunbase",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "module": "src/index.ts",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "build": "bun build src/index.ts --outdir dist",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "knip": "knip",
+    "check": "bun run lint && bun run format:check && bun run typecheck && bun run knip && bun test",
+    "prepare": "lefthook install"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^20.5.0",
+    "@commitlint/config-conventional": "^20.5.0",
+    "@types/bun": "latest",
+    "@types/node": "^25.5.2",
+    "knip": "^6.3.0",
+    "lefthook": "^2.1.4",
+    "oxfmt": "^0.43.0",
+    "oxlint": "^1.58.0"
+  },
+  "peerDependencies": {
+    "typescript": "^6.0.2"
+  }
+}
