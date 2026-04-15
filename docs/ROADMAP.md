@@ -8,15 +8,15 @@ Trackable checklist derived from [PLAN.md](./PLAN.md). Each sprint produces a wo
 
 **Milestone:** Can send a prompt to Claude and stream the response to the terminal.
 
-- [ ] 1.1 Define all core types in `src/types.ts`
-- [ ] 1.2 Model metadata in `src/providers/models.ts` — test: `getModelMetadata` known + unknown
-- [ ] 1.3 Cost calculation in `src/providers/cost.ts` — test: `calculateCost`, `addUsage`
-- [ ] 1.4 Provider types in `src/providers/types.ts`
-- [ ] 1.5 Anthropic provider in `src/providers/anthropic.ts`
-- [ ] 1.6 Provider registry in `src/providers/registry.ts`
-- [ ] 1.7 Retry logic in `src/providers/retry.ts` — test: `isRetryable` unit tests
-- [ ] 1.8 Partial JSON parser in `src/providers/partial-json.ts` — test: extensive edge cases
-- [ ] 1.9 Smoke test — hardcoded prompt, stream to stdout
+- [x] 1.1 Define all core types in `src/types.ts`
+- [x] 1.2 Model metadata in `src/providers/models.ts` — test: `getModelMetadata` known + unknown
+- [x] 1.3 Cost calculation in `src/providers/cost.ts` — test: `calculateCost`, `addUsage`
+- [x] 1.4 Provider types in `src/providers/types.ts`
+- [x] 1.5 Anthropic provider in `src/providers/anthropic.ts` — fix: merge input tokens from `message_start` + output tokens from `message_delta` into `message_end` usage; includes cache token forwarding
+- [x] 1.6 Provider registry in `src/providers/registry.ts`
+- [x] 1.7 Retry logic in `src/providers/retry.ts` — test: `isRetryable` unit tests
+- [x] 1.8 Partial JSON parser in `src/providers/partial-json.ts` — test: extensive edge cases
+- [x] 1.9 Smoke test — hardcoded prompt, stream to stdout
 
 ## Sprint 2: Tools + Security
 
