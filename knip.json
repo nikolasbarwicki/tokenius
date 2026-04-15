@@ -1,6 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["src/smoke.ts"],
   "project": ["src/**/*.{ts,tsx}"],
   "ignoreBinaries": ["tsc"],
+  "ignoreExportsUsedInFile": true,
   "tags": ["-lintignore"]
 }
