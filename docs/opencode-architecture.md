@@ -49,12 +49,12 @@ Research notes from exploring [opencode.ai/docs](https://opencode.ai/docs/) — 
 
 ### Key Files
 
-| File | Purpose |
-|------|---------|
-| `opencode.json` / `opencode.jsonc` | Server/runtime config (schema: `https://opencode.ai/config.json`) |
-| `tui.json` / `tui.jsonc` | TUI-specific config (schema: `https://opencode.ai/tui.json`) |
-| `AGENTS.md` | Project rules/instructions (equiv. to Claude Code's `CLAUDE.md`) |
-| `~/.local/share/opencode/auth.json` | Auth/token storage |
+| File                                | Purpose                                                           |
+| ----------------------------------- | ----------------------------------------------------------------- |
+| `opencode.json` / `opencode.jsonc`  | Server/runtime config (schema: `https://opencode.ai/config.json`) |
+| `tui.json` / `tui.jsonc`            | TUI-specific config (schema: `https://opencode.ai/tui.json`)      |
+| `AGENTS.md`                         | Project rules/instructions (equiv. to Claude Code's `CLAUDE.md`)  |
+| `~/.local/share/opencode/auth.json` | Auth/token storage                                                |
 
 ### Design Philosophy
 
@@ -130,25 +130,25 @@ Uses plural subdirectory names under `.opencode/` or `~/.config/opencode/`:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "provider": {},          // LLM provider credentials + model options
+  "provider": {}, // LLM provider credentials + model options
   "model": "anthropic/claude-sonnet-4-5",
   "small_model": "anthropic/claude-haiku-4-5",
-  "timeout": 300000,       // Overall timeout
-  "chunkTimeout": 30000,   // Per-chunk streaming timeout
-  "tools": {},             // Enable/disable/configure tools
-  "agent": {},             // Agent definitions
+  "timeout": 300000, // Overall timeout
+  "chunkTimeout": 30000, // Per-chunk streaming timeout
+  "tools": {}, // Enable/disable/configure tools
+  "agent": {}, // Agent definitions
   "default_agent": "build",
-  "compaction": {},        // Auto-compact settings
-  "mcp": {},               // MCP server configs
-  "plugin": [],            // Plugin packages
-  "instructions": [],      // Additional rule files
-  "permission": {},        // Tool permission overrides
-  "formatter": {},         // Auto-format on write
-  "lsp": {},               // Language server configs
-  "snapshot": {},          // File snapshot settings
-  "share": {},             // Session sharing settings
-  "watcher": {},           // File watcher settings
-  "experimental": {}       // Experimental features
+  "compaction": {}, // Auto-compact settings
+  "mcp": {}, // MCP server configs
+  "plugin": [], // Plugin packages
+  "instructions": [], // Additional rule files
+  "permission": {}, // Tool permission overrides
+  "formatter": {}, // Auto-format on write
+  "lsp": {}, // Language server configs
+  "snapshot": {}, // File snapshot settings
+  "share": {}, // Session sharing settings
+  "watcher": {}, // File watcher settings
+  "experimental": {} // Experimental features
 }
 ```
 
@@ -162,7 +162,7 @@ Key providers: Anthropic, OpenAI, Google Vertex, Azure, Bedrock, Ollama, LM Stud
 
 ### Model Format
 
-`"provider_id/model_id"` — e.g., `"anthropic/claude-sonnet-4-5"`, `"openai/gpt-4o"`.
+`"provider_id/model_id"` — e.g., `"anthropic/claude-sonnet-4-6"`, `"openai/gpt-5.4"`.
 
 ### Model Priority
 
@@ -216,11 +216,11 @@ CLI flag > config "model" > last used > first by internal priority
 
 ### Built-in Thinking Variants
 
-| Provider | Variants |
-|----------|----------|
-| Anthropic | `high`, `max` |
-| OpenAI | `none`, `minimal`, `low`, `medium`, `high`, `xhigh` |
-| Google | `low`, `high` |
+| Provider  | Variants                                            |
+| --------- | --------------------------------------------------- |
+| Anthropic | `high`, `max`                                       |
+| OpenAI    | `none`, `minimal`, `low`, `medium`, `high`, `xhigh` |
+| Google    | `low`, `high`                                       |
 
 Cycled via TUI keybinds.
 
@@ -232,22 +232,22 @@ Cycled via TUI keybinds.
 
 ### Two Types
 
-| Type | Purpose | Examples |
-|------|---------|---------|
-| **Primary agents** | Main assistants, cycled via Tab key | Build, Plan |
-| **Subagents** | Specialized, invoked by primary agents or `@` mention | General, Explore |
+| Type               | Purpose                                               | Examples         |
+| ------------------ | ----------------------------------------------------- | ---------------- |
+| **Primary agents** | Main assistants, cycled via Tab key                   | Build, Plan      |
+| **Subagents**      | Specialized, invoked by primary agents or `@` mention | General, Explore |
 
 ### Built-in Agents
 
-| Agent | Type | Tools | Purpose |
-|-------|------|-------|---------|
-| Build | Primary | All tools | Main coding agent |
-| Plan | Primary | edit/bash restricted to "ask" | Planning, analysis |
-| General | Subagent | Full tools | General-purpose subtask |
-| Explore | Subagent | Read-only | Code exploration |
-| Compaction | Hidden | None | Context summarization |
-| Title | Hidden | None | Session title generation |
-| Summary | Hidden | None | Session summary |
+| Agent      | Type     | Tools                         | Purpose                  |
+| ---------- | -------- | ----------------------------- | ------------------------ |
+| Build      | Primary  | All tools                     | Main coding agent        |
+| Plan       | Primary  | edit/bash restricted to "ask" | Planning, analysis       |
+| General    | Subagent | Full tools                    | General-purpose subtask  |
+| Explore    | Subagent | Read-only                     | Code exploration         |
+| Compaction | Hidden   | None                          | Context summarization    |
+| Title      | Hidden   | None                          | Session title generation |
+| Summary    | Hidden   | None                          | Session summary          |
 
 ### Agent Configuration (JSON)
 
@@ -307,29 +307,29 @@ You are a security expert. Focus on OWASP top 10 vulnerabilities...
 
 ### Built-in Tools
 
-| Tool | Purpose |
-|------|---------|
-| `bash` | Shell command execution with streaming output |
-| `edit` | Modify existing files |
-| `write` | Create/overwrite files |
-| `read` | Read file contents |
-| `grep` | Pattern search (ripgrep) |
-| `glob` | File discovery by pattern |
-| `list` | Directory listing |
-| `lsp` | Language server queries (experimental) |
-| `apply_patch` | Apply unified diffs |
-| `skill` | Invoke a skill by name |
-| `todowrite` | Manage task list |
-| `webfetch` | Fetch web pages |
-| `websearch` | Search the web (requires Exa API key) |
-| `question` | Ask user a question |
+| Tool          | Purpose                                       |
+| ------------- | --------------------------------------------- |
+| `bash`        | Shell command execution with streaming output |
+| `edit`        | Modify existing files                         |
+| `write`       | Create/overwrite files                        |
+| `read`        | Read file contents                            |
+| `grep`        | Pattern search (ripgrep)                      |
+| `glob`        | File discovery by pattern                     |
+| `list`        | Directory listing                             |
+| `lsp`         | Language server queries (experimental)        |
+| `apply_patch` | Apply unified diffs                           |
+| `skill`       | Invoke a skill by name                        |
+| `todowrite`   | Manage task list                              |
+| `webfetch`    | Fetch web pages                               |
+| `websearch`   | Search the web (requires Exa API key)         |
+| `question`    | Ask user a question                           |
 
 ### Custom Tools
 
 TypeScript/JavaScript files in `.opencode/tools/` or `~/.config/opencode/tools/`:
 
 ```typescript
-import { tool } from "@opencode-ai/plugin"
+import { tool } from "@opencode-ai/plugin";
 
 export default tool({
   description: "Query the project database",
@@ -338,9 +338,9 @@ export default tool({
   },
   async execute(args, ctx) {
     // ctx: { agent, sessionID, messageID, directory, worktree }
-    return `Executed query: ${args.query}`
+    return `Executed query: ${args.query}`;
   },
-})
+});
 ```
 
 **Multiple tools per file** — named exports create `<filename>_<exportname>` tools:
@@ -350,13 +350,13 @@ export const add = tool({
   description: "Add numbers",
   args: { a: tool.schema.number(), b: tool.schema.number() },
   execute: (args) => String(args.a + args.b),
-})
+});
 
 export const multiply = tool({
   description: "Multiply numbers",
   args: { a: tool.schema.number(), b: tool.schema.number() },
   execute: (args) => String(args.a * args.b),
-})
+});
 ```
 
 **Name collision:** Custom tools override built-in tools with same name.
@@ -388,11 +388,11 @@ export const multiply = tool({
 
 ### Three States
 
-| State | Behavior |
-|-------|----------|
-| `allow` | Execute without asking |
-| `ask` | Prompt user (options: once, always/session-scoped, reject) |
-| `deny` | Block execution |
+| State   | Behavior                                                   |
+| ------- | ---------------------------------------------------------- |
+| `allow` | Execute without asking                                     |
+| `ask`   | Prompt user (options: once, always/session-scoped, reject) |
+| `deny`  | Block execution                                            |
 
 ### Permission Scopes
 
@@ -491,6 +491,7 @@ description: "Guide through React migration strategies"
 ---
 
 # React Migration Assistant
+
 You are an expert at migrating legacy React codebases...
 ```
 
@@ -556,12 +557,12 @@ File: @$1
 
 ### Template Features
 
-| Syntax | Purpose |
-|--------|---------|
-| `$ARGUMENTS` | All arguments passed to command |
-| `$1`, `$2`, `$3` | Positional arguments |
+| Syntax           | Purpose                                     |
+| ---------------- | ------------------------------------------- |
+| `$ARGUMENTS`     | All arguments passed to command             |
+| `$1`, `$2`, `$3` | Positional arguments                        |
 | `` !`command` `` | Shell output injection (runs at invocation) |
-| `@filename` | File content embedding |
+| `@filename`      | File content embedding                      |
 
 ### Properties
 
@@ -652,7 +653,7 @@ opencode mcp debug <name>    # Debug connection
 ### Plugin Signature
 
 ```typescript
-import type { Plugin } from "@opencode-ai/plugin"
+import type { Plugin } from "@opencode-ai/plugin";
 
 export const MyPlugin: Plugin = async (ctx) => {
   // ctx: { project, directory, worktree, client, $ }
@@ -661,16 +662,16 @@ export const MyPlugin: Plugin = async (ctx) => {
 
   return {
     "tool.execute.before": async (input) => {
-      console.log(`Tool ${input.tool} called with`, input.args)
+      console.log(`Tool ${input.tool} called with`, input.args);
     },
     "tool.execute.after": async (input) => {
-      console.log(`Tool ${input.tool} returned`, input.result)
+      console.log(`Tool ${input.tool} returned`, input.result);
     },
     "session.idle": async () => {
       // Agent finished, session is idle
     },
-  }
-}
+  };
+};
 ```
 
 ### Loading
@@ -681,26 +682,26 @@ export const MyPlugin: Plugin = async (ctx) => {
 
 ### Available Hooks (30+)
 
-| Category | Hooks |
-|----------|-------|
-| **Commands** | `command.executed` |
-| **Files** | `file.edited`, `file.watcher.updated` |
-| **Installation** | `installation.updated` |
-| **LSP** | `lsp.client.diagnostics`, `lsp.updated` |
-| **Messages** | `message.part.removed`, `message.part.updated`, `message.removed`, `message.updated` |
-| **Permissions** | `permission.asked`, `permission.replied` |
-| **Server** | `server.connected` |
-| **Sessions** | `session.created`, `session.compacted`, `session.deleted`, `session.diff`, `session.error`, `session.idle`, `session.status`, `session.updated` |
-| **Todos** | `todo.updated` |
-| **Shell** | `shell.env` |
-| **Tools** | `tool.execute.before`, `tool.execute.after` |
-| **TUI** | `tui.prompt.append`, `tui.command.execute`, `tui.toast.show` |
-| **Experimental** | `experimental.session.compacting` (inject context or replace compaction prompts) |
+| Category         | Hooks                                                                                                                                           |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Commands**     | `command.executed`                                                                                                                              |
+| **Files**        | `file.edited`, `file.watcher.updated`                                                                                                           |
+| **Installation** | `installation.updated`                                                                                                                          |
+| **LSP**          | `lsp.client.diagnostics`, `lsp.updated`                                                                                                         |
+| **Messages**     | `message.part.removed`, `message.part.updated`, `message.removed`, `message.updated`                                                            |
+| **Permissions**  | `permission.asked`, `permission.replied`                                                                                                        |
+| **Server**       | `server.connected`                                                                                                                              |
+| **Sessions**     | `session.created`, `session.compacted`, `session.deleted`, `session.diff`, `session.error`, `session.idle`, `session.status`, `session.updated` |
+| **Todos**        | `todo.updated`                                                                                                                                  |
+| **Shell**        | `shell.env`                                                                                                                                     |
+| **Tools**        | `tool.execute.before`, `tool.execute.after`                                                                                                     |
+| **TUI**          | `tui.prompt.append`, `tui.command.execute`, `tui.toast.show`                                                                                    |
+| **Experimental** | `experimental.session.compacting` (inject context or replace compaction prompts)                                                                |
 
 ### Logging
 
 ```typescript
-await ctx.client.app.log({ level: "info", message: "Plugin loaded" })
+await ctx.client.app.log({ level: "info", message: "Plugin loaded" });
 ```
 
 ### Community Plugins (30+)
@@ -725,25 +726,25 @@ Notable: sandbox isolation (Daytona), secret redaction (vibeguard), persistent m
 ```json
 {
   "compaction": {
-    "auto": true,        // Automatic compaction when context fills
-    "prune": true,       // Prune old messages after compaction
-    "reserved": 10000    // Reserved tokens for system + response
+    "auto": true, // Automatic compaction when context fills
+    "prune": true, // Prune old messages after compaction
+    "reserved": 10000 // Reserved tokens for system + response
   }
 }
 ```
 
 ### Session API (Server)
 
-| Endpoint | Purpose |
-|----------|---------|
-| `POST /session` | Create session |
-| `GET /session/:id` | Get session details |
-| `DELETE /session/:id` | Delete session |
-| `POST /session/:id/message` | Send message (blocking) |
+| Endpoint                         | Purpose                     |
+| -------------------------------- | --------------------------- |
+| `POST /session`                  | Create session              |
+| `GET /session/:id`               | Get session details         |
+| `DELETE /session/:id`            | Delete session              |
+| `POST /session/:id/message`      | Send message (blocking)     |
 | `POST /session/:id/prompt_async` | Send message (non-blocking) |
-| `POST /session/:id/abort` | Stop execution |
-| `POST /session/:id/fork` | Branch session at message |
-| `POST /session/:id/share` | Enable sharing |
+| `POST /session/:id/abort`        | Stop execution              |
+| `POST /session/:id/fork`         | Branch session at message   |
+| `POST /session/:id/share`        | Enable sharing              |
 
 ### Session Navigation (TUI)
 
@@ -760,25 +761,25 @@ Notable: sandbox isolation (Daytona), secret redaction (vibeguard), persistent m
 
 ### Slash Commands
 
-| Command | Purpose |
-|---------|---------|
-| `/connect` | Connect to MCP server |
-| `/compact` | Compact context |
-| `/details` | Show session details |
-| `/editor` | Open external editor |
-| `/exit` | Quit |
-| `/export` | Export session |
-| `/help` | Show help |
-| `/init` | Generate AGENTS.md |
-| `/models` | Switch model |
-| `/new` | New session |
-| `/redo` | Redo last action |
-| `/sessions` | List sessions |
-| `/share` | Share session |
-| `/themes` | Switch theme |
-| `/thinking` | Toggle thinking mode |
-| `/undo` | Undo last action |
-| `/unshare` | Remove sharing |
+| Command     | Purpose               |
+| ----------- | --------------------- |
+| `/connect`  | Connect to MCP server |
+| `/compact`  | Compact context       |
+| `/details`  | Show session details  |
+| `/editor`   | Open external editor  |
+| `/exit`     | Quit                  |
+| `/export`   | Export session        |
+| `/help`     | Show help             |
+| `/init`     | Generate AGENTS.md    |
+| `/models`   | Switch model          |
+| `/new`      | New session           |
+| `/redo`     | Redo last action      |
+| `/sessions` | List sessions         |
+| `/share`    | Share session         |
+| `/themes`   | Switch theme          |
+| `/thinking` | Toggle thinking mode  |
+| `/undo`     | Undo last action      |
+| `/unshare`  | Remove sharing        |
 
 ### Leader Key System
 
@@ -811,14 +812,14 @@ Custom themes via JSON files in `.opencode/themes/` or `~/.config/opencode/theme
 
 ### Core Commands
 
-| Command | Purpose | Equivalent |
-|---------|---------|------------|
-| `opencode` | Interactive TUI | Pi's Interactive mode |
-| `opencode run` | Non-interactive (stdin → stdout) | Pi's Print mode (`-p`) |
-| `opencode serve` | Headless HTTP server | — (Pi has no separate server) |
-| `opencode web` | Web UI | Pi's `pi-web-ui` package |
-| `opencode attach` | Connect to running server | — |
-| `opencode acp` | ACP protocol (stdio JSON-RPC) | Pi's RPC mode (`--mode rpc`) |
+| Command           | Purpose                          | Equivalent                    |
+| ----------------- | -------------------------------- | ----------------------------- |
+| `opencode`        | Interactive TUI                  | Pi's Interactive mode         |
+| `opencode run`    | Non-interactive (stdin → stdout) | Pi's Print mode (`-p`)        |
+| `opencode serve`  | Headless HTTP server             | — (Pi has no separate server) |
+| `opencode web`    | Web UI                           | Pi's `pi-web-ui` package      |
+| `opencode attach` | Connect to running server        | —                             |
+| `opencode acp`    | ACP protocol (stdio JSON-RPC)    | Pi's RPC mode (`--mode rpc`)  |
 
 ### Management Commands
 
@@ -853,29 +854,29 @@ npm install @opencode-ai/sdk
 ### Client Creation
 
 ```typescript
-import { createOpencode } from "@opencode-ai/sdk"
+import { createOpencode } from "@opencode-ai/sdk";
 
 // Auto-start server
-const { client } = await createOpencode()
+const { client } = await createOpencode();
 
 // Or connect to existing server
-import { createOpencodeClient } from "@opencode-ai/sdk"
-const client = createOpencodeClient({ baseUrl: "http://localhost:4096" })
+import { createOpencodeClient } from "@opencode-ai/sdk";
+const client = createOpencodeClient({ baseUrl: "http://localhost:4096" });
 ```
 
 ### Core APIs
 
 ```typescript
 // Health
-await client.global.health()
+await client.global.health();
 
 // Sessions
-const session = await client.session.create()
+const session = await client.session.create();
 const result = await client.session.prompt({
   path: { id: session.id },
-  body: { parts: [{ type: "text", text: "Hello" }] }
-})
-await client.session.abort({ path: { id: session.id } })
+  body: { parts: [{ type: "text", text: "Hello" }] },
+});
+await client.session.abort({ path: { id: session.id } });
 
 // Structured output
 const structured = await client.session.prompt({
@@ -886,43 +887,43 @@ const structured = await client.session.prompt({
       type: "json_schema",
       schema: {
         type: "object",
-        properties: { score: { type: "number" } }
-      }
-    }
-  }
-})
+        properties: { score: { type: "number" } },
+      },
+    },
+  },
+});
 
 // Search
-await client.find.text({ body: { query: "TODO" } })
-await client.find.files({ body: { query: "*.ts" } })
-await client.find.symbols({ body: { query: "handleClick" } })
+await client.find.text({ body: { query: "TODO" } });
+await client.find.files({ body: { query: "*.ts" } });
+await client.find.symbols({ body: { query: "handleClick" } });
 
 // Events (SSE)
 client.event.subscribe((event) => {
-  console.log(event.type, event.data)
-})
+  console.log(event.type, event.data);
+});
 ```
 
 ### Server Endpoints
 
 Full OpenAPI 3.1 spec at `http://localhost:4096/doc`:
 
-| Path | Methods | Purpose |
-|------|---------|---------|
-| `/global/health` | GET | Health check |
-| `/global/event` | GET | SSE event stream |
-| `/project` | GET | Project info |
-| `/config` | GET, PATCH | Configuration |
-| `/session` | GET, POST | List/create sessions |
-| `/session/:id` | GET, DELETE | Session CRUD |
-| `/session/:id/message` | POST | Send message (blocking) |
-| `/session/:id/prompt_async` | POST | Send message (non-blocking) |
-| `/session/:id/abort` | POST | Stop execution |
-| `/session/:id/fork` | POST | Branch session |
-| `/find` | POST | Search files/text/symbols |
-| `/file` | POST | Read file |
-| `/agent` | GET | List agents |
-| `/mcp` | GET | MCP status |
+| Path                        | Methods     | Purpose                     |
+| --------------------------- | ----------- | --------------------------- |
+| `/global/health`            | GET         | Health check                |
+| `/global/event`             | GET         | SSE event stream            |
+| `/project`                  | GET         | Project info                |
+| `/config`                   | GET, PATCH  | Configuration               |
+| `/session`                  | GET, POST   | List/create sessions        |
+| `/session/:id`              | GET, DELETE | Session CRUD                |
+| `/session/:id/message`      | POST        | Send message (blocking)     |
+| `/session/:id/prompt_async` | POST        | Send message (non-blocking) |
+| `/session/:id/abort`        | POST        | Stop execution              |
+| `/session/:id/fork`         | POST        | Branch session              |
+| `/find`                     | POST        | Search files/text/symbols   |
+| `/file`                     | POST        | Read file                   |
+| `/agent`                    | GET         | List agents                 |
+| `/mcp`                      | GET         | MCP status                  |
 
 ---
 
@@ -972,23 +973,23 @@ Disable auto-download: `OPENCODE_DISABLE_LSP_DOWNLOAD=true`.
 
 ### Architecture Comparison
 
-| Aspect | Pi | OpenCode |
-|--------|-----|----------|
-| **Language** | TypeScript (96%) | Go (server) + TypeScript (plugins/SDK) |
-| **Runtime** | Node.js | Go binary + Bun (plugins) |
-| **Architecture** | Single process, multiple modes | Client-server (HTTP + SSE) |
-| **Multi-client** | No (one mode at a time) | Yes (TUI + IDE + Web simultaneously) |
-| **LLM Abstraction** | Custom unified stream function | AI SDK + Models.dev |
-| **Provider Count** | ~6 (Anthropic, OpenAI, Google, Mistral, Bedrock) | 75+ via AI SDK |
-| **Tool Definition** | TypeBox schema + execute function | Zod schema + `tool()` helper |
-| **Tool Backends** | Pluggable operations (SSH/S3/container) | File-based, no backend abstraction |
-| **Permissions** | Programmatic (`beforeToolCall` hook) | Declarative config (allow/ask/deny + globs) |
-| **Extensions** | Factory function, in-process | Plugin files, client-server boundary |
-| **Session Storage** | Append-only JSONL tree (id+parentId DAG) | Server-managed (details not public) |
-| **Compaction** | 2-phase summarization, cut-point detection | Config-driven (auto/prune/reserved) |
-| **RPC** | JSONL over stdin/stdout | HTTP REST + SSE |
-| **TUI** | Custom framework (`pi-tui`, CSI 2026) | Built-in (Go-based) |
-| **Config** | Settings JSON | 8-level merge with variable substitution |
+| Aspect              | Pi                                               | OpenCode                                    |
+| ------------------- | ------------------------------------------------ | ------------------------------------------- |
+| **Language**        | TypeScript (96%)                                 | Go (server) + TypeScript (plugins/SDK)      |
+| **Runtime**         | Node.js                                          | Go binary + Bun (plugins)                   |
+| **Architecture**    | Single process, multiple modes                   | Client-server (HTTP + SSE)                  |
+| **Multi-client**    | No (one mode at a time)                          | Yes (TUI + IDE + Web simultaneously)        |
+| **LLM Abstraction** | Custom unified stream function                   | AI SDK + Models.dev                         |
+| **Provider Count**  | ~6 (Anthropic, OpenAI, Google, Mistral, Bedrock) | 75+ via AI SDK                              |
+| **Tool Definition** | TypeBox schema + execute function                | Zod schema + `tool()` helper                |
+| **Tool Backends**   | Pluggable operations (SSH/S3/container)          | File-based, no backend abstraction          |
+| **Permissions**     | Programmatic (`beforeToolCall` hook)             | Declarative config (allow/ask/deny + globs) |
+| **Extensions**      | Factory function, in-process                     | Plugin files, client-server boundary        |
+| **Session Storage** | Append-only JSONL tree (id+parentId DAG)         | Server-managed (details not public)         |
+| **Compaction**      | 2-phase summarization, cut-point detection       | Config-driven (auto/prune/reserved)         |
+| **RPC**             | JSONL over stdin/stdout                          | HTTP REST + SSE                             |
+| **TUI**             | Custom framework (`pi-tui`, CSI 2026)            | Built-in (Go-based)                         |
+| **Config**          | Settings JSON                                    | 8-level merge with variable substitution    |
 
 ### What OpenCode Does Better
 

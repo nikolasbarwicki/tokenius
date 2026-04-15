@@ -41,15 +41,15 @@ Research notes from exploring [badlogic/pi-mono](https://github.com/badlogic/pi-
 
 ### Monorepo Package Structure
 
-| Package | Purpose |
-|---------|---------|
-| `pi-ai` | Unified LLM provider abstraction (Anthropic, OpenAI, Google, Mistral, Bedrock, etc.) |
-| `pi-agent-core` | Stateful agent loop — tool execution, steering, events, message management |
-| `pi-coding-agent` | The actual CLI/TUI coding agent (interactive, print, JSON, RPC modes) |
-| `pi-tui` | Custom terminal UI framework with differential rendering |
-| `pi-web-ui` | Web chat interface using web components (mini-lit) |
-| `pi-mom` | Slack bot powered by the agent |
-| `pi-pods` | GPU pod management for self-hosted vLLM |
+| Package           | Purpose                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------ |
+| `pi-ai`           | Unified LLM provider abstraction (Anthropic, OpenAI, Google, Mistral, Bedrock, etc.) |
+| `pi-agent-core`   | Stateful agent loop — tool execution, steering, events, message management           |
+| `pi-coding-agent` | The actual CLI/TUI coding agent (interactive, print, JSON, RPC modes)                |
+| `pi-tui`          | Custom terminal UI framework with differential rendering                             |
+| `pi-web-ui`       | Web chat interface using web components (mini-lit)                                   |
+| `pi-mom`          | Slack bot powered by the agent                                                       |
+| `pi-pods`         | GPU pod management for self-hosted vLLM                                              |
 
 ### Design Philosophy
 
@@ -72,8 +72,8 @@ Every provider implements a single function signature:
 type StreamFunction<TApi, TOptions> = (
   model: Model<TApi>,
   context: Context,
-  options?: TOptions
-) => AssistantMessageEventStream
+  options?: TOptions,
+) => AssistantMessageEventStream;
 ```
 
 ### Streaming Event Types (Discriminated Union)
@@ -91,34 +91,39 @@ type AssistantMessageEvent =
   | { type: "toolcall_delta"; index: number; arguments: string }
   | { type: "toolcall_end"; index: number }
   | { type: "done"; reason: "stop" | "length" | "toolUse"; message: AssistantMessage }
-  | { type: "error"; reason: "aborted" | "error"; error: Error }
+  | { type: "error"; reason: "aborted" | "error"; error: Error };
 ```
 
 ### Message Types
 
 ```typescript
 type UserMessage = {
-  role: "user"
-  content: (TextContent | ImageContent)[]
-  timestamp?: number
-}
+  role: "user";
+  content: (TextContent | ImageContent)[];
+  timestamp?: number;
+};
 
 type AssistantMessage = {
-  role: "assistant"
-  content: (TextContent | ThinkingContent | ToolCall)[]
-  usage: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }
-  stopReason: "stop" | "length" | "toolUse"
-  provider?: string
-}
+  role: "assistant";
+  content: (TextContent | ThinkingContent | ToolCall)[];
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
+  stopReason: "stop" | "length" | "toolUse";
+  provider?: string;
+};
 
 type ToolResultMessage = {
-  role: "toolResult"
-  toolCallId: string
-  toolName: string
-  content: (TextContent | ImageContent)[]
-  details?: Record<string, unknown>
-  error?: boolean
-}
+  role: "toolResult";
+  toolCallId: string;
+  toolName: string;
+  content: (TextContent | ImageContent)[];
+  details?: Record<string, unknown>;
+  error?: boolean;
+};
 ```
 
 ### Provider Registry Pattern
@@ -134,6 +139,7 @@ registerApiProvider({
 ```
 
 Each provider normalizes its SDK output to the common event types:
+
 - **Anthropic:** maps `effort` levels (low/medium/high/max)
 - **OpenAI:** maps `reasoning_effort` (low/medium/high)
 - **Google:** maps `thinkingBudgetTokens` (scaled by model)
@@ -164,10 +170,12 @@ Every `AssistantMessage` includes `usage`. Combined with a model registry storin
 
 ```typescript
 function calculateCost(model, usage): number {
-  return (usage.inputTokens * model.costs.input / 1_000_000) +
-    (usage.outputTokens * model.costs.output / 1_000_000) +
-    ((usage.cacheReadTokens ?? 0) * model.costs.cacheRead / 1_000_000) +
-    ((usage.cacheWriteTokens ?? 0) * model.costs.cacheWrite / 1_000_000);
+  return (
+    (usage.inputTokens * model.costs.input) / 1_000_000 +
+    (usage.outputTokens * model.costs.output) / 1_000_000 +
+    ((usage.cacheReadTokens ?? 0) * model.costs.cacheRead) / 1_000_000 +
+    ((usage.cacheWriteTokens ?? 0) * model.costs.cacheWrite) / 1_000_000
+  );
 }
 ```
 
@@ -191,7 +199,7 @@ class EventStream<T, R> {
   async *[Symbol.asyncIterator]() {
     while (true) {
       if (this.queue.length > 0) yield this.queue.shift()!;
-      else await new Promise(resolve => this.waiters.push(resolve));
+      else await new Promise((resolve) => this.waiters.push(resolve));
       if (this.done) break;
     }
   }
@@ -204,10 +212,10 @@ Maintains regex patterns for 20+ providers to detect overflow:
 
 ```typescript
 const patterns = [
-  /prompt is too long/i,              // Anthropic
-  /max_tokens/i,                       // OpenAI
-  /exceeds maximum context length/i,   // Google
-  /context_length_exceeded/i,          // Others
+  /prompt is too long/i, // Anthropic
+  /max_tokens/i, // OpenAI
+  /exceeds maximum context length/i, // Google
+  /context_length_exceeded/i, // Others
 ];
 ```
 
@@ -219,8 +227,8 @@ Faux provider for unit tests without real API calls:
 registerFauxProvider();
 setResponses([
   fauxAssistantMessage({
-    content: [fauxText("Hello!"), fauxToolCall("calculator", { expression: "2+2" })]
-  })
+    content: [fauxText("Hello!"), fauxToolCall("calculator", { expression: "2+2" })],
+  }),
 ]);
 ```
 
@@ -349,21 +357,21 @@ Events always emitted in order. Subscribers awaited in registration order.
 
 ```typescript
 interface AgentTool<TParameters, TDetails> {
-  name: string;                          // Unique ID used by LLM
-  label: string;                         // Human-readable display
-  description: string;                   // Shown to LLM in system prompt
-  promptSnippet?: string;                // Brief description for prompts
-  promptGuidelines?: string[];           // Best-practice instructions
-  parameters: TSchema;                   // TypeBox schema
-  prepareArguments?: (args: unknown) => Static<TParameters>;  // Legacy compat
+  name: string; // Unique ID used by LLM
+  label: string; // Human-readable display
+  description: string; // Shown to LLM in system prompt
+  promptSnippet?: string; // Brief description for prompts
+  promptGuidelines?: string[]; // Best-practice instructions
+  parameters: TSchema; // TypeBox schema
+  prepareArguments?: (args: unknown) => Static<TParameters>; // Legacy compat
   execute: (
     toolCallId: string,
     params: Static<TParameters>,
     signal?: AbortSignal,
     onUpdate?: AgentToolUpdateCallback<TDetails>,
   ) => Promise<AgentToolResult<TDetails>>;
-  renderCall?(args, theme, context);     // Custom TUI visualization
-  renderResult?(result, options, theme, context);  // Custom result display
+  renderCall?(args, theme, context); // Custom TUI visualization
+  renderResult?(result, options, theme, context); // Custom result display
 }
 ```
 
@@ -380,12 +388,14 @@ interface AgentTool<TParameters, TDetails> {
 ### 7 Built-in Tools
 
 **Coding tools (read/write):**
+
 - `read` — File reading with offset/limit, image detection, auto-resize (2000x2000)
 - `write` — Create/overwrite files (creates parent dirs)
 - `edit` — Unified diff-based editing (line ranges or full files)
 - `bash` — Shell command execution with streaming output, timeout, process tree killing
 
 **Read-only tools (exploration):**
+
 - `grep` — Pattern search with context (via ripgrep)
 - `find` — Glob-based file discovery (via fd)
 - `ls` — Directory listing with stat information
@@ -393,10 +403,12 @@ interface AgentTool<TParameters, TDetails> {
 ### Output Truncation (Mandatory)
 
 Dual limits — whichever hits first:
+
 - **DEFAULT_MAX_LINES:** 2,000 lines
 - **DEFAULT_MAX_BYTES:** 50KB
 
 Two strategies:
+
 - **`truncateHead()`** — keeps beginning (file reads, search results)
 - **`truncateTail()`** — keeps end (bash output, error messages at bottom)
 
@@ -435,7 +447,7 @@ interface ReadOperations {
 }
 
 const readTool = createReadTool({
-  operations: sshBackend  // Swap in SSH, S3, containers, etc.
+  operations: sshBackend, // Swap in SSH, S3, containers, etc.
 });
 ```
 
@@ -488,6 +500,7 @@ session_before_fork → [branch created]
 ### Handler Execution Model
 
 Handlers execute synchronously through extensions:
+
 - Awaited in subscription order
 - Can **short-circuit** with `{ block: true }`
 - Can **chain transformations** by modifying event data
@@ -551,7 +564,7 @@ interface ExtensionContext {
   // Control
   abort(): void;
   compact(): void;
-  getContextUsage(): { used: number, max: number };
+  getContextUsage(): { used: number; max: number };
 
   // Metadata
   cwd: string;
@@ -572,12 +585,15 @@ Skills are **README-driven capabilities** that pre-load specialized instructions
 ```
 
 SKILL.md format:
+
 ```markdown
 ---
 name: react-migration
 description: "Guide through React migration strategies"
 ---
+
 # React Migration Assistant
+
 You are an expert at migrating legacy React codebases...
 ```
 
@@ -606,17 +622,17 @@ Sessions stored as JSONL files. Each line = JSON entry. Entries form a DAG using
 
 ### Entry Types
 
-| Type | Purpose |
-|------|---------|
-| `message` | User/assistant messages with content, tool use, usage stats |
-| `compaction` | Summarized history with `firstKeptEntryId` + `summary` |
-| `model-change` | When model switches |
-| `thinking-level-change` | When reasoning depth adjusts |
-| `branch-summary` | Context snapshot when abandoning a path |
-| `custom` | Extension data (NOT in LLM context) |
-| `custom-message` | Extension-injected LLM messages |
-| `label` | User-defined bookmarks |
-| `session-info` | Metadata like display names |
+| Type                    | Purpose                                                     |
+| ----------------------- | ----------------------------------------------------------- |
+| `message`               | User/assistant messages with content, tool use, usage stats |
+| `compaction`            | Summarized history with `firstKeptEntryId` + `summary`      |
+| `model-change`          | When model switches                                         |
+| `thinking-level-change` | When reasoning depth adjusts                                |
+| `branch-summary`        | Context snapshot when abandoning a path                     |
+| `custom`                | Extension data (NOT in LLM context)                         |
+| `custom-message`        | Extension-injected LLM messages                             |
+| `label`                 | User-defined bookmarks                                      |
+| `session-info`          | Metadata like display names                                 |
 
 ### Base Entry Structure
 
@@ -642,9 +658,9 @@ Sessions stored as JSONL files. Each line = JSON entry. Entries form a DAG using
 Move the leaf pointer to an earlier entry. New messages become children of that entry — a new branch in the tree. No file duplication needed.
 
 ```typescript
-branch(entryId)                          // Move leaf to earlier entry
-branchWithSummary(entryId, summary)      // Add context before branch
-createBranchedSession(fromId, toId)      // Export linear path to new file
+branch(entryId); // Move leaf to earlier entry
+branchWithSummary(entryId, summary); // Add context before branch
+createBranchedSession(fromId, toId); // Export linear path to new file
 ```
 
 ### Schema Migrations
@@ -672,9 +688,11 @@ Auto-upgrade: v1→v2 (tree structure) → v2→v3 (custom role)
 ### Two-Phase Summarization
 
 **Phase 1: History Summary** (for discarded messages)
+
 - Structured format: Goal, Constraints, Progress, Key Decisions, Next Steps, Critical Context
 
 **Phase 2: Turn Prefix Summary** (if splitting a turn)
+
 - Concise summary of prefix context for retained suffix
 
 ### Incremental Updates
@@ -696,6 +714,7 @@ Tracked across tool calls and previous compaction metadata, embedded in summarie
 ### Branch Summarization
 
 When branching away from current path:
+
 1. Collect entries from common ancestor to current position
 2. Convert to messages, respect token budgets
 3. LLM generates structured summary (Goal, Progress, Decisions, Next Steps)
@@ -706,12 +725,12 @@ When branching away from current path:
 
 ### Four Modes Sharing One `AgentSession` Core
 
-| Mode | Use Case | I/O |
-|------|----------|-----|
-| Interactive (TUI) | Daily use | Terminal with editor, streaming, themes |
-| Print (`-p`) | Scripts, pipes | stdin → stdout, exit code |
-| JSON (`--mode json`) | Integrations | JSONL events on stdout |
-| RPC (`--mode rpc`) | Non-Node clients | JSONL commands on stdin, events on stdout |
+| Mode                 | Use Case         | I/O                                       |
+| -------------------- | ---------------- | ----------------------------------------- |
+| Interactive (TUI)    | Daily use        | Terminal with editor, streaming, themes   |
+| Print (`-p`)         | Scripts, pipes   | stdin → stdout, exit code                 |
+| JSON (`--mode json`) | Integrations     | JSONL events on stdout                    |
+| RPC (`--mode rpc`)   | Non-Node clients | JSONL commands on stdin, events on stdout |
 
 ### Mode Resolution Priority
 
@@ -727,6 +746,7 @@ When branching away from current path:
 **JSONL framing** — one JSON object per line, delimited by LF.
 
 **Commands** (stdin):
+
 ```json
 { "id": "req-1", "type": "prompt", "message": "Hello" }
 { "id": "req-2", "type": "set_model", "model": "claude-opus-4-6" }
@@ -734,11 +754,13 @@ When branching away from current path:
 ```
 
 **Responses** (stdout):
+
 ```json
 { "id": "req-1", "type": "response", "command": "prompt", "success": true }
 ```
 
 **Events** (stdout, async):
+
 ```json
 { "type": "message_start", ... }
 { "type": "tool_call", ... }
@@ -748,6 +770,7 @@ When branching away from current path:
 **Command categories:** prompt/steer/follow_up/abort, get_state/get_messages, set_model/cycle_model/set_thinking_level, fork/switch_session/export_html, bash/compaction/retry
 
 **RPC Client** for programmatic access:
+
 ```typescript
 const client = new RpcClient(agentPath, cwd);
 await client.start();
@@ -761,15 +784,16 @@ Custom JSONL parser (avoids Node's `readline` which breaks on U+2028/U+2029 unic
 ### Message Queuing During Streaming
 
 ```typescript
-_steeringMessages   // High-priority, executes after tool calls
-_followUpMessages   // Low-priority, executes when idle
-_pendingBashMessages // Bash results deferred until turn ends
-_pendingNextTurnMessages // Custom messages for next prompt
+_steeringMessages; // High-priority, executes after tool calls
+_followUpMessages; // Low-priority, executes when idle
+_pendingBashMessages; // Bash results deferred until turn ends
+_pendingNextTurnMessages; // Custom messages for next prompt
 ```
 
 ### Auto-Retry Logic
 
 Retryable patterns trigger exponential backoff:
+
 - Rate limits (429)
 - Server errors (5xx)
 - Network timeouts
@@ -781,18 +805,18 @@ Retryable patterns trigger exponential backoff:
 
 ### Architecture Patterns
 
-| Pattern | Purpose | Implementation |
-|---------|---------|----------------|
-| **Provider Registry** | Multi-LLM support | Map-based registry with generic type safety |
-| **Event Stream** | Non-blocking streaming | Queue-and-waiter async iterator |
-| **Two Nested Loops** | Agent control flow | Outer (follow-ups) + inner (tool execution) |
-| **3-Phase Parallel Execution** | Safe concurrent tools | Preflight → concurrent execute → sequential finalize |
-| **Hook System** | Extensible control | beforeToolCall/afterToolCall/transformContext |
-| **Append-Only JSONL Tree** | Session persistence | id+parentId DAG, branching without duplication |
-| **Cut Point Detection** | Smart compaction | Never cut mid-tool-result, structured summaries |
-| **Extension Factory** | Plugin loading | Default export factory, jiti TypeScript loader |
-| **File Mutation Queue** | Concurrent write safety | Per-file promise chain serialization |
-| **Pluggable Operations** | Backend abstraction | Interface injection for SSH/S3/container backends |
+| Pattern                        | Purpose                 | Implementation                                       |
+| ------------------------------ | ----------------------- | ---------------------------------------------------- |
+| **Provider Registry**          | Multi-LLM support       | Map-based registry with generic type safety          |
+| **Event Stream**               | Non-blocking streaming  | Queue-and-waiter async iterator                      |
+| **Two Nested Loops**           | Agent control flow      | Outer (follow-ups) + inner (tool execution)          |
+| **3-Phase Parallel Execution** | Safe concurrent tools   | Preflight → concurrent execute → sequential finalize |
+| **Hook System**                | Extensible control      | beforeToolCall/afterToolCall/transformContext        |
+| **Append-Only JSONL Tree**     | Session persistence     | id+parentId DAG, branching without duplication       |
+| **Cut Point Detection**        | Smart compaction        | Never cut mid-tool-result, structured summaries      |
+| **Extension Factory**          | Plugin loading          | Default export factory, jiti TypeScript loader       |
+| **File Mutation Queue**        | Concurrent write safety | Per-file promise chain serialization                 |
+| **Pluggable Operations**       | Backend abstraction     | Interface injection for SSH/S3/container backends    |
 
 ### Critical Design Decisions
 
@@ -808,6 +832,7 @@ Retryable patterns trigger exponential backoff:
 ### Build Order (Bottom-Up)
 
 If building from scratch:
+
 1. **LLM abstraction** — unified stream function, event types, provider registry
 2. **Tool definitions** — schema, execute, result format, truncation
 3. **Agent loop** — inner/outer loops, tool execution, hooks
@@ -860,6 +885,7 @@ If building from scratch:
 ## Other Agents/Harnesses to Research
 
 > [?] Compare patterns with:
+>
 > - Claude Code (Anthropic's official CLI)
 > - Aider (Paul Gauthier)
 > - Cline (VS Code extension)

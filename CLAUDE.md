@@ -39,7 +39,7 @@ Add dependencies only with justification — the template is intentionally minim
 
 This is a learning project. I'm building this to deeply understand how coding agents work.
 
-- **Explain before implementing.** Before writing code, briefly explain *why* this approach — what tradeoff we're making, what alternatives exist, and why this one wins. Keep it concise (a few sentences, not essays).
+- **Explain before implementing.** Before writing code, briefly explain _why_ this approach — what tradeoff we're making, what alternatives exist, and why this one wins. Keep it concise (a few sentences, not essays).
 - **Ask me decision questions.** When the architecture doc leaves room for interpretation or when there are meaningful implementation choices, ask me what I'd prefer and explain the options. Don't silently pick defaults.
 - **Flag "interesting bits."** When implementing something that teaches a transferable concept (streaming patterns, partial parsing, security boundaries), call it out. A one-liner like "This is the core insight behind X" goes a long way.
 - **Challenge my understanding.** If I suggest an approach that has a non-obvious problem, explain the issue rather than silently fixing it. I want to learn from mistakes, not have them hidden.

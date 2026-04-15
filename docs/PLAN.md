@@ -114,70 +114,70 @@ Effectively: two converters cover the entire market.
 ```typescript
 // --- Provider ---
 
-type ProviderId = "anthropic" | "openai"
+type ProviderId = "anthropic" | "openai";
 
 interface ProviderConfig {
-  apiKey: string
-  baseUrl?: string
+  apiKey: string;
+  baseUrl?: string;
 }
 
 interface Provider {
-  id: ProviderId
-  stream(model: string, context: LLMContext, signal?: AbortSignal): AsyncIterable<StreamEvent>
+  id: ProviderId;
+  stream(model: string, context: LLMContext, signal?: AbortSignal): AsyncIterable<StreamEvent>;
 }
 
 // --- Context sent to LLM ---
 
 interface LLMContext {
-  systemPrompt: string
-  messages: Message[]
-  tools: ToolSchema[]
-  maxTokens: number
+  systemPrompt: string;
+  messages: Message[];
+  tools: ToolSchema[];
+  maxTokens: number;
 }
 
 // --- Messages ---
 
-type Message = UserMessage | AssistantMessage | ToolResultMessage
+type Message = UserMessage | AssistantMessage | ToolResultMessage;
 
 interface UserMessage {
-  role: "user"
-  content: string
+  role: "user";
+  content: string;
 }
 
 interface AssistantMessage {
-  role: "assistant"
-  content: AssistantContent[]
-  usage?: TokenUsage
-  stopReason?: "stop" | "tool_use" | "length" | "error"
+  role: "assistant";
+  content: AssistantContent[];
+  usage?: TokenUsage;
+  stopReason?: "stop" | "tool_use" | "length" | "error";
 }
 
 interface ToolResultMessage {
-  role: "tool_result"
-  toolCallId: string
-  toolName: string
-  content: string
-  isError?: boolean
+  role: "tool_result";
+  toolCallId: string;
+  toolName: string;
+  content: string;
+  isError?: boolean;
 }
 
 // --- Assistant content blocks ---
 
-type AssistantContent = TextBlock | ThinkingBlock | ToolCallBlock
+type AssistantContent = TextBlock | ThinkingBlock | ToolCallBlock;
 
 interface TextBlock {
-  type: "text"
-  text: string
+  type: "text";
+  text: string;
 }
 
 interface ThinkingBlock {
-  type: "thinking"
-  thinking: string
+  type: "thinking";
+  thinking: string;
 }
 
 interface ToolCallBlock {
-  type: "tool_call"
-  id: string
-  name: string
-  arguments: Record<string, unknown>
+  type: "tool_call";
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
 }
 
 // --- Streaming events (discriminated union) ---
@@ -190,15 +190,15 @@ type StreamEvent =
   | { type: "tool_call_delta"; arguments: string }
   | { type: "tool_call_end" }
   | { type: "message_end"; usage: TokenUsage; stopReason: string }
-  | { type: "error"; error: Error }
+  | { type: "error"; error: Error };
 
 // --- Token tracking ---
 
 interface TokenUsage {
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens?: number
-  cacheWriteTokens?: number
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
 }
 ```
 
@@ -209,27 +209,35 @@ Updated when new models ship. ~30 lines for 2 providers.
 
 ```typescript
 interface ModelMetadata {
-  id: string
-  provider: ProviderId
-  contextWindow: number
-  maxOutputTokens: number
-  pricing: ModelPricing
-  supportsCaching: boolean
+  id: string;
+  provider: ProviderId;
+  contextWindow: number;
+  maxOutputTokens: number;
+  pricing: ModelPricing;
+  supportsCaching: boolean;
 }
 
 interface ModelPricing {
-  input: number   // Cost per 1M tokens
-  output: number
-  cacheRead?: number
-  cacheWrite?: number
+  input: number; // Cost per 1M tokens
+  output: number;
+  cacheRead?: number;
+  cacheWrite?: number;
 }
 
 const MODELS: Record<string, ModelMetadata> = {
-  "claude-sonnet-4-20250514": {
-    id: "claude-sonnet-4-20250514",
+  "claude-opus-4-6": {
+    id: "claude-opus-4-6",
     provider: "anthropic",
-    contextWindow: 200_000,
-    maxOutputTokens: 16_384,
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    pricing: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+    supportsCaching: true,
+  },
+  "claude-sonnet-4-6": {
+    id: "claude-sonnet-4-6",
+    provider: "anthropic",
+    contextWindow: 1_000_000,
+    maxOutputTokens: 64_000,
     pricing: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
     supportsCaching: true,
   },
@@ -237,32 +245,40 @@ const MODELS: Record<string, ModelMetadata> = {
     id: "claude-haiku-4-5-20251001",
     provider: "anthropic",
     contextWindow: 200_000,
-    maxOutputTokens: 16_384,
-    pricing: { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 1 },
+    maxOutputTokens: 64_000,
+    pricing: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
     supportsCaching: true,
   },
-  "gpt-4o": {
-    id: "gpt-4o",
+  "gpt-5.4": {
+    id: "gpt-5.4",
     provider: "openai",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    pricing: { input: 2.5, output: 10 },
-    supportsCaching: false,
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    pricing: { input: 2.5, output: 15, cacheRead: 1.25 },
+    supportsCaching: true,
   },
-  "gpt-4o-mini": {
-    id: "gpt-4o-mini",
+  "gpt-5.4-mini": {
+    id: "gpt-5.4-mini",
     provider: "openai",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    pricing: { input: 0.15, output: 0.6 },
-    supportsCaching: false,
+    contextWindow: 400_000,
+    maxOutputTokens: 128_000,
+    pricing: { input: 0.75, output: 4.5, cacheRead: 0.375 },
+    supportsCaching: true,
   },
-}
+  "gpt-5.4-nano": {
+    id: "gpt-5.4-nano",
+    provider: "openai",
+    contextWindow: 400_000,
+    maxOutputTokens: 128_000,
+    pricing: { input: 0.2, output: 1.25, cacheRead: 0.1 },
+    supportsCaching: true,
+  },
+};
 
 function getModelMetadata(model: string): ModelMetadata {
-  const meta = MODELS[model]
-  if (!meta) throw new Error(`Unknown model: ${model}. Add it to MODELS in models.ts`)
-  return meta
+  const meta = MODELS[model];
+  if (!meta) throw new Error(`Unknown model: ${model}. Add it to MODELS in models.ts`);
+  return meta;
 }
 ```
 
@@ -270,15 +286,14 @@ function getModelMetadata(model: string): ModelMetadata {
 
 ```typescript
 function calculateCost(model: string, usage: TokenUsage): number {
-  const meta = MODELS[model]
-  if (!meta) return 0
-  const { pricing } = meta
+  const meta = getModelMetadata(model); // throws on unknown model (fail-fast)
+  const { pricing } = meta;
   return (
     (usage.inputTokens * pricing.input) / 1_000_000 +
     (usage.outputTokens * pricing.output) / 1_000_000 +
     ((usage.cacheReadTokens ?? 0) * (pricing.cacheRead ?? 0)) / 1_000_000 +
     ((usage.cacheWriteTokens ?? 0) * (pricing.cacheWrite ?? 0)) / 1_000_000
-  )
+  );
 }
 ```
 
@@ -289,53 +304,69 @@ the provider's SDK stream into the common `StreamEvent` type.
 
 ```typescript
 // src/providers/anthropic.ts
-import Anthropic from "@anthropic-ai/sdk"
+import Anthropic from "@anthropic-ai/sdk";
 
 export function createAnthropicProvider(config: ProviderConfig): Provider {
-  const client = new Anthropic({ apiKey: config.apiKey })
+  const client = new Anthropic({ apiKey: config.apiKey });
 
   return {
     id: "anthropic",
     async *stream(model, context, signal) {
-      const stream = client.messages.stream({
-        model,
-        system: context.systemPrompt,
-        messages: convertMessages(context.messages),  // Map to Anthropic format (nearly 1:1)
-        tools: convertTools(context.tools),
-        max_tokens: context.maxTokens,
-      }, { signal })
+      const stream = client.messages.stream(
+        {
+          model,
+          system: context.systemPrompt,
+          messages: convertMessages(context.messages), // Map to Anthropic format (nearly 1:1)
+          tools: convertTools(context.tools),
+          max_tokens: context.maxTokens,
+        },
+        { signal },
+      );
+
+      // Anthropic splits usage across two stream events:
+      // - message_start carries input_tokens (+ cache tokens)
+      // - message_delta carries output_tokens
+      // We capture input usage here and merge into message_end so consumers
+      // see complete TokenUsage in one place.
+      let inputUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 
       for await (const event of stream) {
-        yield mapToStreamEvent(event)  // Normalize to common StreamEvent
+        if (event.type === "message_start") {
+          inputUsage = extractInputUsage(event); // input + cache tokens
+        }
+        yield mapToStreamEvent(event, inputUsage); // Normalize to common StreamEvent
       }
     },
-  }
+  };
 }
 ```
 
 ```typescript
 // src/providers/openai.ts — also works for xAI, GLM, Kimi, DeepSeek via baseUrl
-import OpenAI from "openai"
+import OpenAI from "openai";
 
 export function createOpenAIProvider(config: ProviderConfig): Provider {
-  const client = new OpenAI({ apiKey: config.apiKey, baseURL: config.baseUrl })
+  const client = new OpenAI({ apiKey: config.apiKey, baseURL: config.baseUrl });
 
   return {
     id: "openai",
     async *stream(model, context, signal) {
-      const stream = await client.chat.completions.create({
-        model,
-        messages: convertMessages(context.messages),   // Reshape content blocks → tool_calls array
-        tools: convertTools(context.tools),
-        max_tokens: context.maxTokens,
-        stream: true,
-      }, { signal })
+      const stream = await client.chat.completions.create(
+        {
+          model,
+          messages: convertMessages(context.messages), // Reshape content blocks → tool_calls array
+          tools: convertTools(context.tools),
+          max_tokens: context.maxTokens,
+          stream: true,
+        },
+        { signal },
+      );
 
       for await (const chunk of stream) {
-        yield mapToStreamEvent(chunk)  // Normalize to common StreamEvent
+        yield mapToStreamEvent(chunk); // Normalize to common StreamEvent
       }
     },
-  }
+  };
 }
 ```
 
@@ -343,16 +374,16 @@ export function createOpenAIProvider(config: ProviderConfig): Provider {
 
 ```typescript
 // src/providers/registry.ts
-const providers = new Map<ProviderId, Provider>()
+const providers = new Map<ProviderId, Provider>();
 
 function registerProvider(provider: Provider): void {
-  providers.set(provider.id, provider)
+  providers.set(provider.id, provider);
 }
 
 function getProvider(id: ProviderId): Provider {
-  const provider = providers.get(id)
-  if (!provider) throw new Error(`Unknown provider: ${id}`)
-  return provider
+  const provider = providers.get(id);
+  if (!provider) throw new Error(`Unknown provider: ${id}`);
+  return provider;
 }
 ```
 
@@ -368,9 +399,9 @@ nested objects/arrays, and trailing commas without a full JSON grammar.
 ```typescript
 function parsePartialJson<T>(incomplete: string): T {
   try {
-    return JSON.parse(incomplete)
+    return JSON.parse(incomplete);
   } catch {
-    return closeBrackets(incomplete) as T
+    return closeBrackets(incomplete) as T;
   }
 }
 
@@ -393,67 +424,67 @@ function closeBrackets(input: string): unknown {
   //   '{"a": "line1\nli'        → '{"a": "line1\nli"}'
   //   '{"a": true, "b":'        → '{"a": true}' (strip incomplete pair)
 
-  const stack: string[] = []
-  let inString = false
-  let escaped = false
-  let lastValidPos = 0
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  let lastValidPos = 0;
 
   for (let i = 0; i < input.length; i++) {
-    const ch = input[i]
+    const ch = input[i];
 
     if (escaped) {
-      escaped = false
-      continue
+      escaped = false;
+      continue;
     }
 
     if (ch === "\\") {
-      escaped = true
-      continue
+      escaped = true;
+      continue;
     }
 
     if (inString) {
-      if (ch === '"') inString = false
-      continue
+      if (ch === '"') inString = false;
+      continue;
     }
 
     switch (ch) {
       case '"':
-        inString = true
-        break
+        inString = true;
+        break;
       case "{":
       case "[":
-        stack.push(ch)
-        break
+        stack.push(ch);
+        break;
       case "}":
-        if (stack.at(-1) === "{") stack.pop()
-        lastValidPos = i
-        break
+        if (stack.at(-1) === "{") stack.pop();
+        lastValidPos = i;
+        break;
       case "]":
-        if (stack.at(-1) === "[") stack.pop()
-        lastValidPos = i
-        break
+        if (stack.at(-1) === "[") stack.pop();
+        lastValidPos = i;
+        break;
     }
   }
 
-  let repaired = input
+  let repaired = input;
 
   // Close open string
-  if (inString) repaired += '"'
+  if (inString) repaired += '"';
 
   // Strip trailing incomplete key-value (comma, colon, or dangling key)
-  repaired = repaired.replace(/,\s*"[^"]*"?\s*:?\s*$/, "")
-  repaired = repaired.replace(/,\s*$/, "")
-  repaired = repaired.replace(/:\s*$/, "")
+  repaired = repaired.replace(/,\s*"[^"]*"?\s*:?\s*$/, "");
+  repaired = repaired.replace(/,\s*$/, "");
+  repaired = repaired.replace(/:\s*$/, "");
 
   // Close remaining open structures
   for (let i = stack.length - 1; i >= 0; i--) {
-    repaired += stack[i] === "{" ? "}" : "]"
+    repaired += stack[i] === "{" ? "}" : "]";
   }
 
   try {
-    return JSON.parse(repaired)
+    return JSON.parse(repaired);
   } catch {
-    return {}
+    return {};
   }
 }
 ```
@@ -467,7 +498,7 @@ const RETRY_CONFIG = {
   maxRetries: 3,
   baseDelayMs: 1_000,
   retryableStatuses: [429, 500, 502, 503, 529],
-}
+};
 
 async function* streamWithRetry(
   provider: Provider,
@@ -475,33 +506,33 @@ async function* streamWithRetry(
   context: LLMContext,
   signal?: AbortSignal,
 ): AsyncIterable<StreamEvent> {
-  let lastError: Error | undefined
+  let lastError: Error | undefined;
 
   for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
     try {
-      yield* provider.stream(model, context, signal)
-      return  // Success
+      yield* provider.stream(model, context, signal);
+      return; // Success
     } catch (error) {
-      lastError = error as Error
-      if (!isRetryable(error) || attempt === RETRY_CONFIG.maxRetries) break
-      const delay = RETRY_CONFIG.baseDelayMs * 2 ** attempt  // 1s, 2s, 4s
-      await Bun.sleep(delay)
+      lastError = error as Error;
+      if (!isRetryable(error) || attempt === RETRY_CONFIG.maxRetries) break;
+      const delay = RETRY_CONFIG.baseDelayMs * 2 ** attempt; // 1s, 2s, 4s
+      await Bun.sleep(delay);
     }
   }
 
   // Discard partial stream on failure — the LLM can regenerate
-  throw lastError
+  throw lastError;
 }
 
 function isRetryable(error: unknown): boolean {
   if (error instanceof Error) {
     // Rate limit or server errors
-    const status = (error as { status?: number }).status
-    if (status && RETRY_CONFIG.retryableStatuses.includes(status)) return true
+    const status = (error as { status?: number }).status;
+    if (status && RETRY_CONFIG.retryableStatuses.includes(status)) return true;
     // Network errors
-    if (error.message.includes("ECONNRESET") || error.message.includes("fetch failed")) return true
+    if (error.message.includes("ECONNRESET") || error.message.includes("fetch failed")) return true;
   }
-  return false
+  return false;
 }
 ```
 
@@ -511,25 +542,25 @@ No compaction. Hard stop when context is full. Uses **real token counts** from
 provider responses, not estimation.
 
 ```typescript
-const CONTEXT_RESERVE = 20_000  // Space for system prompt + tools + response
+const CONTEXT_RESERVE = 20_000; // Space for system prompt + tools + response
 
 interface ContextTracker {
-  lastKnownInputTokens: number  // From most recent provider response
-  contextWindow: number          // From model metadata
+  lastKnownInputTokens: number; // From most recent provider response
+  contextWindow: number; // From model metadata
 }
 
 function isContextExhausted(tracker: ContextTracker): boolean {
-  return tracker.lastKnownInputTokens > tracker.contextWindow - CONTEXT_RESERVE
+  return tracker.lastKnownInputTokens > tracker.contextWindow - CONTEXT_RESERVE;
 }
 
 // Called after each LLM response:
 function updateTokenTracking(tracker: ContextTracker, usage: TokenUsage): void {
-  tracker.lastKnownInputTokens = usage.inputTokens
+  tracker.lastKnownInputTokens = usage.inputTokens;
 }
 
 // Fallback estimation for the very first message (no prior usage data):
 function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4)
+  return Math.ceil(text.length / 4);
 }
 ```
 
@@ -548,30 +579,27 @@ Start a new session or use /clear to reset.
 
 ```typescript
 interface ToolDefinition<TParams = Record<string, unknown>> {
-  name: string
-  description: string                    // Shown to LLM
-  parameters: JsonSchema                 // JSON Schema for validation
-  execute: (
-    params: TParams,
-    context: ToolContext,
-  ) => Promise<ToolResult>
+  name: string;
+  description: string; // Shown to LLM
+  parameters: JsonSchema; // JSON Schema for validation
+  execute: (params: TParams, context: ToolContext) => Promise<ToolResult>;
 }
 
 interface ToolContext {
-  cwd: string                            // Working directory
-  signal: AbortSignal                    // Cancellation
+  cwd: string; // Working directory
+  signal: AbortSignal; // Cancellation
 }
 
 interface ToolResult {
-  content: string
-  isError?: boolean
+  content: string;
+  isError?: boolean;
 }
 
 type JsonSchema = {
-  type: "object"
-  properties: Record<string, unknown>
-  required?: string[]
-}
+  type: "object";
+  properties: Record<string, unknown>;
+  required?: string[];
+};
 ```
 
 ### Tool Registry
@@ -579,26 +607,26 @@ type JsonSchema = {
 Tools are registered at startup. Schemas are sorted deterministically for prompt caching.
 
 ```typescript
-const tools = new Map<string, ToolDefinition>()
+const tools = new Map<string, ToolDefinition>();
 
 function registerTool(tool: ToolDefinition): void {
-  tools.set(tool.name, tool)
+  tools.set(tool.name, tool);
 }
 
 function getTool(name: string): ToolDefinition | undefined {
-  return tools.get(name)
+  return tools.get(name);
 }
 
 function getToolSchemas(allowedTools: string[]): ToolSchema[] {
   return allowedTools
-    .sort()  // Deterministic order for prompt caching
+    .sort() // Deterministic order for prompt caching
     .map((name) => tools.get(name))
     .filter(Boolean)
     .map((t) => ({
       name: t.name,
       description: t.description,
       parameters: t.parameters,
-    }))
+    }));
 }
 ```
 
@@ -607,14 +635,14 @@ function getToolSchemas(allowedTools: string[]): ToolSchema[] {
 Every tool result passes through truncation before reaching the LLM:
 
 ```typescript
-const MAX_LINES = 2000
-const MAX_BYTES = 50_000  // 50KB
+const MAX_LINES = 2000;
+const MAX_BYTES = 50_000; // 50KB
 
 interface TruncationResult {
-  content: string
-  wasTruncated: boolean
-  originalLines: number
-  originalBytes: number
+  content: string;
+  wasTruncated: boolean;
+  originalLines: number;
+  originalBytes: number;
 }
 
 function truncateHead(output: string): TruncationResult {
@@ -773,21 +801,21 @@ The core algorithm. A single function that handles any agent configuration.
 
 ```typescript
 interface AgentLoopConfig {
-  agent: AgentConfig               // Which agent (build, plan, explore)
-  provider: Provider               // LLM provider
-  model: string                    // Model ID
-  messages: Message[]              // Conversation history
-  systemPrompt: string             // Assembled once at session start (static for caching)
-  tools: ToolDefinition[]          // Available tools for this agent
-  maxTurns: number                 // Safety limit
-  signal?: AbortSignal             // Cancellation (Ctrl+C)
-  onEvent?: (event: AgentEvent) => void  // Progress callback for UI
+  agent: AgentConfig; // Which agent (build, plan, explore)
+  provider: Provider; // LLM provider
+  model: string; // Model ID
+  messages: Message[]; // Conversation history
+  systemPrompt: string; // Assembled once at session start (static for caching)
+  tools: ToolDefinition[]; // Available tools for this agent
+  maxTurns: number; // Safety limit
+  signal?: AbortSignal; // Cancellation (Ctrl+C)
+  onEvent?: (event: AgentEvent) => void; // Progress callback for UI
 }
 
 interface AgentLoopResult {
-  messages: Message[]              // Updated message history
-  usage: TokenUsage                // Accumulated token usage
-  turns: number                    // How many LLM calls were made
+  messages: Message[]; // Updated message history
+  usage: TokenUsage; // Accumulated token usage
+  turns: number; // How many LLM calls were made
 }
 ```
 
@@ -803,35 +831,36 @@ type AgentEvent =
   | { type: "tool_result"; name: string; result: ToolResult }
   | { type: "turn_end"; usage: TokenUsage }
   | { type: "context_limit_reached" }
-  | { type: "error"; error: Error }
+  | { type: "error"; error: Error };
 ```
 
 ### The Loop
 
 ```typescript
 async function agentLoop(config: AgentLoopConfig): Promise<AgentLoopResult> {
-  const { agent, provider, model, messages, systemPrompt, tools, maxTurns, signal, onEvent } = config
-  let totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 }
-  let turn = 0
+  const { agent, provider, model, messages, systemPrompt, tools, maxTurns, signal, onEvent } =
+    config;
+  let totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  let turn = 0;
 
-  const modelMeta = getModelMetadata(model)
+  const modelMeta = getModelMetadata(model);
   const contextTracker: ContextTracker = {
     lastKnownInputTokens: 0,
     contextWindow: modelMeta.contextWindow,
-  }
+  };
 
   while (turn < maxTurns) {
     // 0. Check abort
-    if (signal?.aborted) break
+    if (signal?.aborted) break;
 
     // 1. Check context limit
     if (isContextExhausted(contextTracker)) {
-      onEvent?.({ type: "context_limit_reached" })
-      break
+      onEvent?.({ type: "context_limit_reached" });
+      break;
     }
 
-    turn++
-    onEvent?.({ type: "turn_start", turn })
+    turn++;
+    onEvent?.({ type: "turn_start", turn });
 
     // 2. Build LLM context
     const context: LLMContext = {
@@ -839,35 +868,35 @@ async function agentLoop(config: AgentLoopConfig): Promise<AgentLoopResult> {
       messages,
       tools: getToolSchemas(agent.tools),
       maxTokens: modelMeta.maxOutputTokens,
-    }
+    };
 
     // 3. Stream LLM response (with retry)
-    let assistantMessage: AssistantMessage
+    let assistantMessage: AssistantMessage;
     try {
-      assistantMessage = await streamResponse(provider, model, context, signal, onEvent)
+      assistantMessage = await streamResponse(provider, model, context, signal, onEvent);
     } catch (error) {
-      onEvent?.({ type: "error", error: error as Error })
-      break
+      onEvent?.({ type: "error", error: error as Error });
+      break;
     }
 
-    messages.push(assistantMessage)
-    totalUsage = addUsage(totalUsage, assistantMessage.usage)
-    updateTokenTracking(contextTracker, assistantMessage.usage)
-    onEvent?.({ type: "turn_end", usage: assistantMessage.usage })
+    messages.push(assistantMessage);
+    totalUsage = addUsage(totalUsage, assistantMessage.usage);
+    updateTokenTracking(contextTracker, assistantMessage.usage);
+    onEvent?.({ type: "turn_end", usage: assistantMessage.usage });
 
     // 4. Check stop condition
-    const toolCalls = extractToolCalls(assistantMessage)
-    if (toolCalls.length === 0) break  // Done — no more tool calls
+    const toolCalls = extractToolCalls(assistantMessage);
+    if (toolCalls.length === 0) break; // Done — no more tool calls
 
     // 5. Validate all tool calls, batch permission prompts upfront
-    const validated = await validateToolCalls(toolCalls, tools, onEvent)
+    const validated = await validateToolCalls(toolCalls, tools, onEvent);
 
     // 6. Execute tools sequentially
-    const toolResults = await executeToolsSequential(validated, tools, signal, onEvent)
-    messages.push(...toolResults)
+    const toolResults = await executeToolsSequential(validated, tools, signal, onEvent);
+    messages.push(...toolResults);
   }
 
-  return { messages, usage: totalUsage, turns: turn }
+  return { messages, usage: totalUsage, turns: turn };
 }
 ```
 
@@ -881,52 +910,52 @@ async function streamResponse(
   signal: AbortSignal | undefined,
   onEvent: ((event: AgentEvent) => void) | undefined,
 ): Promise<AssistantMessage> {
-  const content: AssistantContent[] = []
-  let usage: TokenUsage = { inputTokens: 0, outputTokens: 0 }
-  let stopReason: string = "stop"
-  let currentToolArgs = ""
+  const content: AssistantContent[] = [];
+  let usage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  let stopReason: string = "stop";
+  let currentToolArgs = "";
 
   // streamWithRetry handles network errors and rate limits (3x backoff)
   for await (const event of streamWithRetry(provider, model, context, signal)) {
     switch (event.type) {
       case "text_delta":
-        appendToLastTextBlock(content, event.text)
-        onEvent?.({ type: "text_delta", text: event.text })
-        break
+        appendToLastTextBlock(content, event.text);
+        onEvent?.({ type: "text_delta", text: event.text });
+        break;
 
       case "thinking_delta":
-        appendToLastThinkingBlock(content, event.thinking)
-        onEvent?.({ type: "thinking_delta", thinking: event.thinking })
-        break
+        appendToLastThinkingBlock(content, event.thinking);
+        onEvent?.({ type: "thinking_delta", thinking: event.thinking });
+        break;
 
       case "tool_call_start":
-        content.push({ type: "tool_call", id: event.id, name: event.name, arguments: {} })
-        currentToolArgs = ""
-        onEvent?.({ type: "tool_call_start", name: event.name, id: event.id })
-        break
+        content.push({ type: "tool_call", id: event.id, name: event.name, arguments: {} });
+        currentToolArgs = "";
+        onEvent?.({ type: "tool_call_start", name: event.name, id: event.id });
+        break;
 
       case "tool_call_delta":
-        currentToolArgs += event.arguments
-        onEvent?.({ type: "tool_call_args", name: "", partialArgs: currentToolArgs })
-        break
+        currentToolArgs += event.arguments;
+        onEvent?.({ type: "tool_call_args", name: "", partialArgs: currentToolArgs });
+        break;
 
       case "tool_call_end": {
-        const lastToolCall = content.at(-1) as ToolCallBlock
-        lastToolCall.arguments = parsePartialJson(currentToolArgs)
-        break
+        const lastToolCall = content.at(-1) as ToolCallBlock;
+        lastToolCall.arguments = parsePartialJson(currentToolArgs);
+        break;
       }
 
       case "message_end":
-        usage = event.usage
-        stopReason = event.stopReason
-        break
+        usage = event.usage;
+        stopReason = event.stopReason;
+        break;
 
       case "error":
-        throw event.error
+        throw event.error;
     }
   }
 
-  return { role: "assistant", content, usage, stopReason }
+  return { role: "assistant", content, usage, stopReason };
 }
 ```
 
@@ -941,49 +970,53 @@ async function validateToolCalls(
   tools: ToolDefinition[],
   onEvent: ((event: AgentEvent) => void) | undefined,
 ): Promise<ValidatedToolCall[]> {
-  const results: ValidatedToolCall[] = []
-  const permissionsNeeded: PermissionRequest[] = []
+  const results: ValidatedToolCall[] = [];
+  const permissionsNeeded: PermissionRequest[] = [];
 
   // Phase 1: Validate all calls, collect permission requests
   for (const call of toolCalls) {
-    const tool = getTool(call.name)
+    const tool = getTool(call.name);
     if (!tool) {
-      results.push({ call, tool: null, error: `Unknown tool: ${call.name}` })
-      continue
+      results.push({ call, tool: null, error: `Unknown tool: ${call.name}` });
+      continue;
     }
 
-    const validation = validateArgs(tool.parameters, call.arguments)
+    const validation = validateArgs(tool.parameters, call.arguments);
     if (!validation.valid) {
-      results.push({ call, tool, error: validation.errors.join("\n") })
-      continue
+      results.push({ call, tool, error: validation.errors.join("\n") });
+      continue;
     }
 
-    const security = checkToolPermission(call)
+    const security = checkToolPermission(call);
     if (security.blocked) {
-      results.push({ call, tool, error: security.reason })
-      continue
+      results.push({ call, tool, error: security.reason });
+      continue;
     }
 
     if (security.requiresConfirmation) {
-      permissionsNeeded.push({ tool: call.name, description: describeToolCall(call), reason: security.reason })
+      permissionsNeeded.push({
+        tool: call.name,
+        description: describeToolCall(call),
+        reason: security.reason,
+      });
     }
 
-    results.push({ call, tool })
+    results.push({ call, tool });
   }
 
   // Phase 2: Batch permission prompt (one prompt for all dangerous operations)
   if (permissionsNeeded.length > 0) {
-    const responses = await promptPermissions(permissionsNeeded)
+    const responses = await promptPermissions(permissionsNeeded);
     // Mark denied calls as errors
     for (const [i, response] of responses.entries()) {
       if (response === "deny") {
-        const idx = results.findIndex((r) => r.call.name === permissionsNeeded[i].tool && !r.error)
-        if (idx !== -1) results[idx].error = "User denied permission"
+        const idx = results.findIndex((r) => r.call.name === permissionsNeeded[i].tool && !r.error);
+        if (idx !== -1) results[idx].error = "User denied permission";
       }
     }
   }
 
-  return results
+  return results;
 }
 
 async function executeToolsSequential(
@@ -992,7 +1025,7 @@ async function executeToolsSequential(
   signal: AbortSignal | undefined,
   onEvent: ((event: AgentEvent) => void) | undefined,
 ): Promise<ToolResultMessage[]> {
-  const results: ToolResultMessage[] = []
+  const results: ToolResultMessage[] = [];
 
   for (const v of validated) {
     if (v.error) {
@@ -1002,20 +1035,19 @@ async function executeToolsSequential(
         toolName: v.call.name,
         content: v.error,
         isError: true,
-      })
-      continue
+      });
+      continue;
     }
 
-    onEvent?.({ type: "tool_call_start", name: v.call.name, id: v.call.id })
+    onEvent?.({ type: "tool_call_start", name: v.call.name, id: v.call.id });
 
     const result = await v.tool.execute(v.call.arguments, {
       cwd: process.cwd(),
       signal: signal ?? AbortSignal.timeout(120_000),
-    })
+    });
 
-    const truncated = v.call.name === "bash"
-      ? truncateTail(result.content)
-      : truncateHead(result.content)
+    const truncated =
+      v.call.name === "bash" ? truncateTail(result.content) : truncateHead(result.content);
 
     results.push({
       role: "tool_result",
@@ -1023,11 +1055,11 @@ async function executeToolsSequential(
       toolName: v.call.name,
       content: truncated.content,
       isError: result.isError,
-    })
-    onEvent?.({ type: "tool_result", name: v.call.name, result })
+    });
+    onEvent?.({ type: "tool_result", name: v.call.name, result });
   }
 
-  return results
+  return results;
 }
 ```
 
@@ -1039,11 +1071,11 @@ async function executeToolsSequential(
 
 ```typescript
 interface AgentConfig {
-  name: string
-  description: string
-  systemPrompt: string
-  tools: string[]        // Tool names this agent can use
-  maxTurns: number
+  name: string;
+  description: string;
+  systemPrompt: string;
+  tools: string[]; // Tool names this agent can use
+  maxTurns: number;
 }
 ```
 
@@ -1063,7 +1095,8 @@ When a task requires exploration or planning without changes, delegate to a suba
 
   plan: {
     name: "plan",
-    description: "Planning and analysis agent. Reads code, reasons about architecture, produces plans. Cannot modify files or run commands.",
+    description:
+      "Planning and analysis agent. Reads code, reasons about architecture, produces plans. Cannot modify files or run commands.",
     systemPrompt: `You are a planning assistant. Analyze code, reason about architecture, and produce detailed plans.
 You CANNOT modify files or run commands — only read and search.
 Be thorough but concise. Structure your output with clear headings.`,
@@ -1073,13 +1106,14 @@ Be thorough but concise. Structure your output with clear headings.`,
 
   explore: {
     name: "explore",
-    description: "Fast codebase exploration agent. Searches files, reads code, answers questions about the codebase. Cannot modify anything.",
+    description:
+      "Fast codebase exploration agent. Searches files, reads code, answers questions about the codebase. Cannot modify anything.",
     systemPrompt: `You are a codebase exploration assistant. Quickly find files, search patterns, and read code to answer questions.
 Be concise — report findings, not process.`,
     tools: ["read", "grep", "glob"],
     maxTurns: 10,
   },
-}
+};
 ```
 
 **Note:** Subagents (plan, explore) do NOT get the `spawn_agent` tool — no recursive spawning.
@@ -1101,39 +1135,39 @@ const spawnAgentTool: ToolDefinition = {
     required: ["agent", "prompt"],
   },
   async execute(params, context) {
-    const agentConfig = AGENTS[params.agent]
-    if (!agentConfig) return { content: `Unknown agent: ${params.agent}`, isError: true }
+    const agentConfig = AGENTS[params.agent];
+    if (!agentConfig) return { content: `Unknown agent: ${params.agent}`, isError: true };
 
-    const tools = agentConfig.tools.map(getTool).filter(Boolean)
+    const tools = agentConfig.tools.map(getTool).filter(Boolean);
 
     const result = await agentLoop({
       agent: agentConfig,
-      provider: currentProvider,     // Inherit from parent
-      model: currentModel,           // Inherit from parent
-      messages: [{ role: "user", content: params.prompt }],  // Fresh history
-      systemPrompt: buildSystemPrompt(agentConfig),           // Includes AGENTS.md
+      provider: currentProvider, // Inherit from parent
+      model: currentModel, // Inherit from parent
+      messages: [{ role: "user", content: params.prompt }], // Fresh history
+      systemPrompt: buildSystemPrompt(agentConfig), // Includes AGENTS.md
       tools,
       maxTurns: agentConfig.maxTurns,
       signal: context.signal,
-    })
+    });
 
     // Return only the final text response (opaque to parent)
-    const lastAssistant = result.messages.findLast((m) => m.role === "assistant")
-    const text = extractText(lastAssistant)
+    const lastAssistant = result.messages.findLast((m) => m.role === "assistant");
+    const text = extractText(lastAssistant);
 
     // Show subagent cost to user (not in the tool result — just for display)
-    const cost = calculateCost(currentModel, result.usage)
+    const cost = calculateCost(currentModel, result.usage);
     onEvent?.({
       type: "tool_result",
       name: "spawn_agent",
       result: {
         content: `${agentConfig.name} agent: ${result.turns} turns, ${result.usage.inputTokens + result.usage.outputTokens} tokens, $${cost.toFixed(4)}`,
       },
-    })
+    });
 
-    return { content: text || "(subagent produced no response)" }
+    return { content: text || "(subagent produced no response)" };
   },
-}
+};
 ```
 
 ### System Prompt Assembly
@@ -1143,19 +1177,21 @@ No dynamic content (no timestamps, no turn counts).
 
 ```typescript
 function buildSystemPrompt(agent: AgentConfig, cwd: string): string {
-  const parts: string[] = [agent.systemPrompt]
+  const parts: string[] = [agent.systemPrompt];
 
   // Add AGENTS.md if present
-  const agentsMd = loadAgentsMd(cwd)
+  const agentsMd = loadAgentsMd(cwd);
   if (agentsMd) {
-    parts.push(`## Project Rules (AGENTS.md)\n\n${agentsMd}`)
+    parts.push(`## Project Rules (AGENTS.md)\n\n${agentsMd}`);
   }
 
   // Add available skills summary (only for build agent)
   if (agent.name === "build") {
-    const skills = discoverSkills(cwd)
+    const skills = discoverSkills(cwd);
     if (skills.length > 0) {
-      parts.push(`## Available Skills\n\nThe user can invoke skills with /skill:<name>. Available:\n${skills.map((s) => `- /skill:${s.name} — ${s.description}`).join("\n")}`)
+      parts.push(
+        `## Available Skills\n\nThe user can invoke skills with /skill:<name>. Available:\n${skills.map((s) => `- /skill:${s.name} — ${s.description}`).join("\n")}`,
+      );
     }
   }
 
@@ -1163,9 +1199,9 @@ function buildSystemPrompt(agent: AgentConfig, cwd: string): string {
   parts.push(`## Security Rules
 - Never read or write files outside the project directory
 - Never write secrets or API keys to files
-- Always confirm before running destructive commands (rm -rf, git reset, etc.)`)
+- Always confirm before running destructive commands (rm -rf, git reset, etc.)`);
 
-  return parts.join("\n\n")
+  return parts.join("\n\n");
 }
 ```
 
@@ -1178,28 +1214,37 @@ function buildSystemPrompt(agent: AgentConfig, cwd: string): string {
 All file operations pass through path validation:
 
 ```typescript
-function validatePath(filePath: string, cwd: string): { valid: boolean; resolved: string; reason?: string } {
-  const resolved = resolve(cwd, filePath)
+function validatePath(
+  filePath: string,
+  cwd: string,
+): { valid: boolean; resolved: string; reason?: string } {
+  const resolved = resolve(cwd, filePath);
 
   // Must be within project directory (cwd or below)
   if (!resolved.startsWith(cwd)) {
-    return { valid: false, resolved, reason: "Path outside project directory" }
+    return { valid: false, resolved, reason: "Path outside project directory" };
   }
 
   // Block sensitive files
-  const basename = path.basename(resolved)
-  const BLOCKED_FILES = [".env", ".env.local", ".env.production", "credentials.json", "secrets.json"]
+  const basename = path.basename(resolved);
+  const BLOCKED_FILES = [
+    ".env",
+    ".env.local",
+    ".env.production",
+    "credentials.json",
+    "secrets.json",
+  ];
   if (BLOCKED_FILES.includes(basename)) {
-    return { valid: false, resolved, reason: `Access to ${basename} is blocked for security` }
+    return { valid: false, resolved, reason: `Access to ${basename} is blocked for security` };
   }
 
   // Block sensitive directories
-  const BLOCKED_DIRS = [".git/objects", ".git/refs", "node_modules/.cache"]
+  const BLOCKED_DIRS = [".git/objects", ".git/refs", "node_modules/.cache"];
   if (BLOCKED_DIRS.some((d) => resolved.includes(d))) {
-    return { valid: false, resolved, reason: "Access to this directory is blocked" }
+    return { valid: false, resolved, reason: "Access to this directory is blocked" };
   }
 
-  return { valid: true, resolved }
+  return { valid: true, resolved };
 }
 ```
 
@@ -1209,18 +1254,18 @@ For the `bash` tool:
 
 ```typescript
 interface CommandCheck {
-  allowed: boolean
-  requiresConfirmation: boolean
-  reason?: string
+  allowed: boolean;
+  requiresConfirmation: boolean;
+  reason?: string;
 }
 
 const BLOCKED_PATTERNS = [
-  /\brm\s+(-[rf]+\s+)?\/(?!\w)/,       // rm -rf / (root deletion)
-  /\bmkfs\b/,                            // Format filesystem
-  /\bdd\s+.*of=\/dev/,                   // Write to device
-  />\s*\/dev\/sd/,                        // Redirect to device
-  /\bcurl\b.*\|\s*\bsh\b/,              // Pipe curl to shell
-]
+  /\brm\s+(-[rf]+\s+)?\/(?!\w)/, // rm -rf / (root deletion)
+  /\bmkfs\b/, // Format filesystem
+  /\bdd\s+.*of=\/dev/, // Write to device
+  />\s*\/dev\/sd/, // Redirect to device
+  /\bcurl\b.*\|\s*\bsh\b/, // Pipe curl to shell
+];
 
 const CONFIRM_PATTERNS = [
   { pattern: /\brm\s+-[rf]/, reason: "Recursive/forced file deletion" },
@@ -1231,22 +1276,22 @@ const CONFIRM_PATTERNS = [
   { pattern: /\bdrop\s+database\b/i, reason: "SQL database drop" },
   { pattern: /\bchmod\s+777\b/, reason: "Overly permissive file permissions" },
   { pattern: /\bsudo\b/, reason: "Elevated privileges" },
-]
+];
 
 function checkCommand(command: string): CommandCheck {
   for (const pattern of BLOCKED_PATTERNS) {
     if (pattern.test(command)) {
-      return { allowed: false, requiresConfirmation: false, reason: "Command blocked for safety" }
+      return { allowed: false, requiresConfirmation: false, reason: "Command blocked for safety" };
     }
   }
 
   for (const { pattern, reason } of CONFIRM_PATTERNS) {
     if (pattern.test(command)) {
-      return { allowed: true, requiresConfirmation: true, reason }
+      return { allowed: true, requiresConfirmation: true, reason };
     }
   }
 
-  return { allowed: true, requiresConfirmation: false }
+  return { allowed: true, requiresConfirmation: false };
 }
 ```
 
@@ -1257,14 +1302,14 @@ Prevent the LLM from writing secrets to files:
 ```typescript
 const SECRET_PATTERNS = [
   /(?:api[_-]?key|secret|token|password)\s*[:=]\s*["']?[a-zA-Z0-9_\-]{20,}/i,
-  /sk-[a-zA-Z0-9]{20,}/,           // OpenAI keys
-  /sk-ant-[a-zA-Z0-9\-]{20,}/,     // Anthropic keys
-  /ghp_[a-zA-Z0-9]{36,}/,          // GitHub tokens
-  /AKIA[A-Z0-9]{16}/,              // AWS access keys
-]
+  /sk-[a-zA-Z0-9]{20,}/, // OpenAI keys
+  /sk-ant-[a-zA-Z0-9\-]{20,}/, // Anthropic keys
+  /ghp_[a-zA-Z0-9]{36,}/, // GitHub tokens
+  /AKIA[A-Z0-9]{16}/, // AWS access keys
+];
 
 function containsSecrets(content: string): boolean {
-  return SECRET_PATTERNS.some((p) => p.test(content))
+  return SECRET_PATTERNS.some((p) => p.test(content));
 }
 ```
 
@@ -1277,16 +1322,16 @@ When tool calls require confirmation, prompts are batched upfront before any exe
 
 ```typescript
 interface PermissionRequest {
-  tool: string
-  description: string       // Human-readable description of what will happen
-  reason: string            // Why confirmation is needed
+  tool: string;
+  description: string; // Human-readable description of what will happen
+  reason: string; // Why confirmation is needed
 }
 
 // Returns: "allow" | "deny" | "allow_session" (remember for this session)
-type PermissionResponse = "allow" | "deny" | "allow_session"
+type PermissionResponse = "allow" | "deny" | "allow_session";
 
 // Session-scoped memory for "allow_session" responses
-const sessionPermissions = new Map<string, boolean>()
+const sessionPermissions = new Map<string, boolean>();
 
 // Batch prompt: shows all dangerous operations at once, user approves/denies each
 async function promptPermissions(requests: PermissionRequest[]): Promise<PermissionResponse[]> {
@@ -1319,6 +1364,7 @@ One session = one `.jsonl` file. Stored project-local.
 ```
 
 **First-run hint:** On first session creation, print once:
+
 ```
 Session saved to .tokenius/sessions/abc123.jsonl
 Tip: Add .tokenius/sessions/ to your .gitignore
@@ -1332,7 +1378,7 @@ Tip: Add .tokenius/sessions/ to your .gitignore
   "id": "abc123",
   "timestamp": "2026-04-13T10:00:00Z",
   "cwd": "/Users/nikolas.b/Dev/myproject",
-  "model": "claude-sonnet-4-20250514",
+  "model": "claude-sonnet-4-6",
   "title": "Fix auth bug"
 }
 ```
@@ -1340,22 +1386,22 @@ Tip: Add .tokenius/sessions/ to your .gitignore
 ### Entry Types
 
 ```typescript
-type SessionEntry = SessionHeader | MessageEntry
+type SessionEntry = SessionHeader | MessageEntry;
 
 interface SessionHeader {
-  type: "session"
-  id: string
-  timestamp: string
-  cwd: string
-  model: string
-  title?: string
+  type: "session";
+  id: string;
+  timestamp: string;
+  cwd: string;
+  model: string;
+  title?: string;
 }
 
 interface MessageEntry {
-  type: "message"
-  id: string
-  timestamp: string
-  message: Message
+  type: "message";
+  id: string;
+  timestamp: string;
+  message: Message;
 }
 ```
 
@@ -1363,24 +1409,24 @@ interface MessageEntry {
 
 ```typescript
 interface SessionManager {
-  create(cwd: string, model: string): Session
-  list(cwd: string): SessionSummary[]          // Filtered by cwd
-  load(id: string): Session
-  append(sessionId: string, entry: SessionEntry): void
+  create(cwd: string, model: string): Session;
+  list(cwd: string): SessionSummary[]; // Filtered by cwd
+  load(id: string): Session;
+  append(sessionId: string, entry: SessionEntry): void;
 }
 
 interface Session {
-  id: string
-  header: SessionHeader
-  messages: Message[]
+  id: string;
+  header: SessionHeader;
+  messages: Message[];
 }
 
 interface SessionSummary {
-  id: string
-  title: string
-  cwd: string
-  timestamp: string
-  messageCount: number
+  id: string;
+  title: string;
+  cwd: string;
+  timestamp: string;
+  messageCount: number;
 }
 ```
 
@@ -1389,7 +1435,11 @@ interface SessionSummary {
 After the first LLM response, generate a short title from the first user message:
 
 ```typescript
-async function generateSessionTitle(firstUserMessage: string, provider: Provider, model: string): Promise<string> {
+async function generateSessionTitle(
+  firstUserMessage: string,
+  provider: Provider,
+  model: string,
+): Promise<string> {
   // Quick LLM call: "Summarize this request in 3-5 words for a session title"
   // e.g., "Fix auth bug" or "Add pagination to API"
 }
@@ -1399,8 +1449,8 @@ async function generateSessionTitle(firstUserMessage: string, provider: Provider
 
 ```typescript
 function appendEntry(sessionPath: string, entry: SessionEntry): void {
-  const line = JSON.stringify(entry) + "\n"
-  Bun.write(sessionPath, line, { append: true })
+  const line = JSON.stringify(entry) + "\n";
+  Bun.write(sessionPath, line, { append: true });
 }
 ```
 
@@ -1408,20 +1458,20 @@ function appendEntry(sessionPath: string, entry: SessionEntry): void {
 
 ```typescript
 function loadSession(sessionPath: string): Session {
-  const content = Bun.file(sessionPath).text()
-  const lines = content.split("\n").filter(Boolean)
-  const entries = lines.map((l) => JSON.parse(l) as SessionEntry)
+  const content = Bun.file(sessionPath).text();
+  const lines = content.split("\n").filter(Boolean);
+  const entries = lines.map((l) => JSON.parse(l) as SessionEntry);
 
-  const header = entries[0] as SessionHeader
-  const messages: Message[] = []
+  const header = entries[0] as SessionHeader;
+  const messages: Message[] = [];
 
   for (const entry of entries.slice(1)) {
     if (entry.type === "message") {
-      messages.push(entry.message)
+      messages.push(entry.message);
     }
   }
 
-  return { id: header.id, header, messages }
+  return { id: header.id, header, messages };
 }
 ```
 
@@ -1429,24 +1479,24 @@ function loadSession(sessionPath: string): Session {
 
 ```typescript
 function listSessions(cwd: string): SessionSummary[] {
-  const sessionsDir = join(cwd, ".tokenius", "sessions")
-  if (!existsSync(sessionsDir)) return []
+  const sessionsDir = join(cwd, ".tokenius", "sessions");
+  if (!existsSync(sessionsDir)) return [];
 
-  const files = readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"))
+  const files = readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
   return files
     .map((f) => {
-      const firstLine = readFirstLine(join(sessionsDir, f))
-      const header = JSON.parse(firstLine) as SessionHeader
-      const lineCount = countLines(join(sessionsDir, f))
+      const firstLine = readFirstLine(join(sessionsDir, f));
+      const header = JSON.parse(firstLine) as SessionHeader;
+      const lineCount = countLines(join(sessionsDir, f));
       return {
         id: header.id,
         title: header.title ?? "(untitled)",
         cwd: header.cwd,
         timestamp: header.timestamp,
-        messageCount: lineCount - 1,  // Subtract header
-      }
+        messageCount: lineCount - 1, // Subtract header
+      };
     })
-    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))  // Most recent first
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp)); // Most recent first
 }
 ```
 
@@ -1458,10 +1508,10 @@ function listSessions(cwd: string): SessionSummary[] {
 
 ```typescript
 interface Skill {
-  name: string                // kebab-case, 1-64 chars
-  description: string
-  content: string             // Full markdown content (body after frontmatter)
-  path: string                // Source file path
+  name: string; // kebab-case, 1-64 chars
+  description: string;
+  content: string; // Full markdown content (body after frontmatter)
+  path: string; // Source file path
 }
 ```
 
@@ -1471,20 +1521,20 @@ Skills are discovered from `.tokenius/skills/` in the project directory.
 
 ```typescript
 function discoverSkills(cwd: string): Skill[] {
-  const skills: Skill[] = []
-  const skillDir = join(cwd, ".tokenius", "skills")
+  const skills: Skill[] = [];
+  const skillDir = join(cwd, ".tokenius", "skills");
 
-  if (!existsSync(skillDir)) return skills
+  if (!existsSync(skillDir)) return skills;
 
   for (const entry of readdirSync(skillDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    const skillMd = join(skillDir, entry.name, "SKILL.md")
+    if (!entry.isDirectory()) continue;
+    const skillMd = join(skillDir, entry.name, "SKILL.md");
     if (existsSync(skillMd)) {
-      skills.push(parseSkill(skillMd))
+      skills.push(parseSkill(skillMd));
     }
   }
 
-  return skills
+  return skills;
 }
 ```
 
@@ -1492,30 +1542,33 @@ function discoverSkills(cwd: string): Skill[] {
 
 ```typescript
 function parseSkill(path: string): Skill {
-  const content = readFileSync(path, "utf-8")
-  const { frontmatter, body } = parseFrontmatter(content)
+  const content = readFileSync(path, "utf-8");
+  const { frontmatter, body } = parseFrontmatter(content);
 
   return {
     name: frontmatter.name ?? basename(dirname(path)),
     description: frontmatter.description ?? "",
     content: body,
     path,
-  }
+  };
 }
 
 function parseFrontmatter(content: string): { frontmatter: Record<string, string>; body: string } {
-  const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/)
-  if (!match) return { frontmatter: {}, body: content }
+  const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (!match) return { frontmatter: {}, body: content };
 
-  const frontmatter: Record<string, string> = {}
+  const frontmatter: Record<string, string> = {};
   for (const line of match[1].split("\n")) {
-    const [key, ...rest] = line.split(":")
+    const [key, ...rest] = line.split(":");
     if (key && rest.length) {
-      frontmatter[key.trim()] = rest.join(":").trim().replace(/^["']|["']$/g, "")
+      frontmatter[key.trim()] = rest
+        .join(":")
+        .trim()
+        .replace(/^["']|["']$/g, "");
     }
   }
 
-  return { frontmatter, body: match[2] }
+  return { frontmatter, body: match[2] };
 }
 ```
 
@@ -1526,10 +1579,10 @@ to the user message (simplest approach):
 
 ```typescript
 function invokeSkill(skillName: string, userPrompt: string, cwd: string): string {
-  const skill = discoverSkills(cwd).find((s) => s.name === skillName)
-  if (!skill) throw new Error(`Unknown skill: ${skillName}`)
+  const skill = discoverSkills(cwd).find((s) => s.name === skillName);
+  if (!skill) throw new Error(`Unknown skill: ${skillName}`);
 
-  return `${skill.content}\n\n---\n\nUser request: ${userPrompt}`
+  return `${skill.content}\n\n---\n\nUser request: ${userPrompt}`;
 }
 ```
 
@@ -1557,6 +1610,7 @@ Review the provided code with focus on:
 4. **Error handling** — missing cases, swallowed errors
 
 Format your review as:
+
 - Critical (must fix)
 - Warning (should fix)
 - Suggestion (nice to have)
@@ -1573,58 +1627,60 @@ No API keys in config — env vars only (via `.env` or shell environment).
 ```typescript
 interface TokeniusConfig {
   // LLM
-  provider: ProviderId               // Default: "anthropic"
-  model: string                      // Default: "claude-sonnet-4-20250514"
+  provider: ProviderId; // Default: "anthropic"
+  model: string; // Default: "claude-sonnet-4-6"
 
   // Agent
-  maxTurns?: number                  // Override default per-agent maxTurns
+  maxTurns?: number; // Override default per-agent maxTurns
 
   // Security
   permissions?: {
-    bash?: PermissionRule[]          // Glob patterns for allow/deny
-    blockedPaths?: string[]          // Additional blocked file paths
-  }
+    bash?: PermissionRule[]; // Glob patterns for allow/deny
+    blockedPaths?: string[]; // Additional blocked file paths
+  };
 }
 
 interface PermissionRule {
-  pattern: string                    // Glob pattern (e.g., "git *")
-  action: "allow" | "deny" | "ask"
+  pattern: string; // Glob pattern (e.g., "git *")
+  action: "allow" | "deny" | "ask";
 }
 
 const DEFAULT_CONFIG: TokeniusConfig = {
   provider: "anthropic",
-  model: "claude-sonnet-4-20250514",
-}
+  model: "claude-sonnet-4-6",
+};
 ```
 
 ### Config Loading — Fail Fast
 
 ```typescript
 function loadConfig(cwd: string): TokeniusConfig {
-  const configPath = join(cwd, "tokenius.json")
-  if (!existsSync(configPath)) return DEFAULT_CONFIG
+  const configPath = join(cwd, "tokenius.json");
+  if (!existsSync(configPath)) return DEFAULT_CONFIG;
 
-  let raw: unknown
+  let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(configPath, "utf-8"))
+    raw = JSON.parse(readFileSync(configPath, "utf-8"));
   } catch (error) {
-    throw new Error(`Invalid JSON in tokenius.json: ${(error as Error).message}`)
+    throw new Error(`Invalid JSON in tokenius.json: ${(error as Error).message}`);
   }
 
-  const config = { ...DEFAULT_CONFIG, ...(raw as Partial<TokeniusConfig>) }
+  const config = { ...DEFAULT_CONFIG, ...(raw as Partial<TokeniusConfig>) };
 
   // Validate provider
   if (!["anthropic", "openai"].includes(config.provider)) {
-    throw new Error(`Invalid provider "${config.provider}" in tokenius.json. Must be "anthropic" or "openai".`)
+    throw new Error(
+      `Invalid provider "${config.provider}" in tokenius.json. Must be "anthropic" or "openai".`,
+    );
   }
 
   // Validate model
   if (!MODELS[config.model]) {
-    const known = Object.keys(MODELS).join(", ")
-    throw new Error(`Unknown model "${config.model}" in tokenius.json. Known models: ${known}`)
+    const known = Object.keys(MODELS).join(", ");
+    throw new Error(`Unknown model "${config.model}" in tokenius.json. Known models: ${known}`);
   }
 
-  return config
+  return config;
 }
 ```
 
@@ -1632,12 +1688,12 @@ function loadConfig(cwd: string): TokeniusConfig {
 
 ```typescript
 function resolveApiKey(provider: ProviderId): string {
-  const envKey = provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"
-  const value = process.env[envKey]  // Bun auto-loads .env
+  const envKey = provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
+  const value = process.env[envKey]; // Bun auto-loads .env
   if (!value) {
-    throw new Error(`Missing ${envKey}. Set it in your environment or .env file.`)
+    throw new Error(`Missing ${envKey}. Set it in your environment or .env file.`);
   }
-  return value
+  return value;
 }
 ```
 
@@ -1647,11 +1703,11 @@ Simple: load from project root if present.
 
 ```typescript
 function loadAgentsMd(cwd: string): string | null {
-  const agentsPath = join(cwd, "AGENTS.md")
+  const agentsPath = join(cwd, "AGENTS.md");
   if (existsSync(agentsPath)) {
-    return readFileSync(agentsPath, "utf-8")
+    return readFileSync(agentsPath, "utf-8");
   }
-  return null
+  return null;
 }
 ```
 
@@ -1664,57 +1720,57 @@ function loadAgentsMd(cwd: string): string | null {
 Start here. No dependencies beyond what Bun provides + chalk for colors.
 
 ```typescript
-import { createInterface } from "readline"
+import { createInterface } from "readline";
 
 async function main() {
   // Fail fast on bad config
-  const config = loadConfig(process.cwd())
-  const apiKey = resolveApiKey(config.provider)
-  const provider = createProvider(config.provider, { apiKey })
+  const config = loadConfig(process.cwd());
+  const apiKey = resolveApiKey(config.provider);
+  const provider = createProvider(config.provider, { apiKey });
 
   // Build system prompt ONCE (static for prompt caching)
-  const systemPrompt = buildSystemPrompt(AGENTS.build, process.cwd())
+  const systemPrompt = buildSystemPrompt(AGENTS.build, process.cwd());
 
   // Always start a new session
-  const session = sessionManager.create(process.cwd(), config.model)
+  const session = sessionManager.create(process.cwd(), config.model);
 
-  const rl = createInterface({ input: process.stdin, output: process.stdout })
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
 
-  console.log("Tokenius — type /help for commands, /quit to exit\n")
+  console.log("Tokenius — type /help for commands, /quit to exit\n");
 
   // Abort controller for Ctrl+C handling
-  let abortController = new AbortController()
+  let abortController = new AbortController();
 
   // First Ctrl+C aborts the loop, second kills the process
-  let lastCtrlC = 0
+  let lastCtrlC = 0;
   process.on("SIGINT", () => {
-    const now = Date.now()
-    if (now - lastCtrlC < 1000) process.exit(0)  // Double Ctrl+C = kill
-    lastCtrlC = now
-    abortController.abort()
-    abortController = new AbortController()  // Reset for next prompt
-  })
+    const now = Date.now();
+    if (now - lastCtrlC < 1000) process.exit(0); // Double Ctrl+C = kill
+    lastCtrlC = now;
+    abortController.abort();
+    abortController = new AbortController(); // Reset for next prompt
+  });
 
   while (true) {
-    const input = await question(rl, "> ")
-    if (!input.trim()) continue
+    const input = await question(rl, "> ");
+    if (!input.trim()) continue;
 
     // Handle slash commands
     if (input.startsWith("/")) {
-      await handleCommand(input, session)
-      continue
+      await handleCommand(input, session);
+      continue;
     }
 
     // Handle skill invocation: /skill:name rest of prompt
-    let userMessage = input
+    let userMessage = input;
     if (input.startsWith("/skill:")) {
-      const skillName = input.slice(7).split(" ")[0]
-      const userPrompt = input.slice(7 + skillName.length).trim()
-      userMessage = invokeSkill(skillName, userPrompt, process.cwd())
+      const skillName = input.slice(7).split(" ")[0];
+      const userPrompt = input.slice(7 + skillName.length).trim();
+      userMessage = invokeSkill(skillName, userPrompt, process.cwd());
     }
 
     // Add user message
-    session.messages.push({ role: "user", content: userMessage })
+    session.messages.push({ role: "user", content: userMessage });
 
     // Run agent loop
     const result = await agentLoop({
@@ -1727,16 +1783,16 @@ async function main() {
       maxTurns: config.maxTurns ?? AGENTS.build.maxTurns,
       signal: abortController.signal,
       onEvent: (event) => renderEvent(event),
-    })
+    });
 
-    session.messages = result.messages
-    persistSession(session)
-    printUsage(result.usage, config.model)
+    session.messages = result.messages;
+    persistSession(session);
+    printUsage(result.usage, config.model);
 
     // Generate title after first exchange
     if (!session.header.title) {
-      session.header.title = await generateSessionTitle(input, provider, config.model)
-      updateSessionHeader(session)
+      session.header.title = await generateSessionTitle(input, provider, config.model);
+      updateSessionHeader(session);
     }
   }
 }
@@ -1746,54 +1802,76 @@ async function main() {
 
 ```typescript
 const COMMANDS: Record<string, (args: string, session: Session) => Promise<void>> = {
-  "/help":     async () => { printHelp() },
-  "/quit":     async () => { process.exit(0) },
-  "/sessions": async () => { listSessions(process.cwd()) },
-  "/load":     async (id) => { /* load session by id, replace current */ },
-  "/cost":     async (_, session) => { printSessionCost(session) },
-  "/clear":    async (_, session) => { session.messages = [] },
-  "/model":    async (model) => { /* validate and switch model */ },
-  "/skills":   async () => { listAvailableSkills(process.cwd()) },
-  "/usage":    async (_, session) => { printDetailedUsage(session) },
-  "/replay":   async (id) => { /* replay a saved session's messages without re-executing */ },
-}
+  "/help": async () => {
+    printHelp();
+  },
+  "/quit": async () => {
+    process.exit(0);
+  },
+  "/sessions": async () => {
+    listSessions(process.cwd());
+  },
+  "/load": async (id) => {
+    /* load session by id, replace current */
+  },
+  "/cost": async (_, session) => {
+    printSessionCost(session);
+  },
+  "/clear": async (_, session) => {
+    session.messages = [];
+  },
+  "/model": async (model) => {
+    /* validate and switch model */
+  },
+  "/skills": async () => {
+    listAvailableSkills(process.cwd());
+  },
+  "/usage": async (_, session) => {
+    printDetailedUsage(session);
+  },
+  "/replay": async (id) => {
+    /* replay a saved session's messages without re-executing */
+  },
+};
 ```
 
 ### Streaming Output Rendering
 
 ```typescript
-import chalk from "chalk"
+import chalk from "chalk";
 
 function renderEvent(event: AgentEvent): void {
   switch (event.type) {
     case "text_delta":
-      process.stdout.write(event.text)
-      break
+      process.stdout.write(event.text);
+      break;
     case "thinking_delta":
-      process.stdout.write(chalk.dim(event.thinking))
-      break
+      process.stdout.write(chalk.dim(event.thinking));
+      break;
     case "tool_call_start":
-      console.log(chalk.cyan(`\n> ${event.name}`))
-      break
+      console.log(chalk.cyan(`\n> ${event.name}`));
+      break;
     case "tool_result":
       if (event.result.isError) {
-        console.log(chalk.red(`  x Error: ${event.result.content.slice(0, 200)}`))
+        console.log(chalk.red(`  x Error: ${event.result.content.slice(0, 200)}`));
       } else {
-        console.log(chalk.green(`  Done (${event.result.content.length} chars)`))
+        console.log(chalk.green(`  Done (${event.result.content.length} chars)`));
       }
-      break
+      break;
     case "turn_end":
       // Optionally show per-turn token count
-      break
+      break;
     case "context_limit_reached":
-      console.log(chalk.yellow("\nSession context full. Start a new session or use /clear."))
-      break
+      console.log(chalk.yellow("\nSession context full. Start a new session or use /clear."));
+      break;
   }
 }
 
 function printUsage(usage: TokenUsage, model: string): void {
-  const cost = calculateCost(model, usage)
-  console.log(chalk.dim(`\n${usage.inputTokens + usage.outputTokens} tokens ($${cost.toFixed(4)})`))
+  const cost = calculateCost(model, usage);
+  console.log(
+    chalk.dim(`\n${usage.inputTokens + usage.outputTokens} tokens ($${cost.toFixed(4)})`),
+  );
 }
 ```
 
@@ -1803,6 +1881,7 @@ When ready, replace the readline loop with a proper TUI. The agent loop and even
 don't change — only the rendering layer.
 
 Key TUI features to add:
+
 - Spinner during LLM response + tool execution
 - Syntax highlighting for code blocks
 - Split view (input at bottom, output scrolling above)
@@ -1828,48 +1907,48 @@ highest signal-to-effort ratio.
 
 ```typescript
 // src/tools/truncation.test.ts
-import { describe, expect, it } from "bun:test"
-import { truncateHead, truncateTail } from "./truncation"
+import { describe, expect, it } from "bun:test";
+import { truncateHead, truncateTail } from "./truncation";
 
 describe("truncateHead", () => {
   it("returns content unchanged when under limits", () => {
-    const result = truncateHead("line1\nline2\nline3")
-    expect(result.wasTruncated).toBe(false)
-    expect(result.content).toBe("line1\nline2\nline3")
-  })
+    const result = truncateHead("line1\nline2\nline3");
+    expect(result.wasTruncated).toBe(false);
+    expect(result.content).toBe("line1\nline2\nline3");
+  });
 
   it("truncates to MAX_LINES and appends metadata", () => {
-    const input = Array.from({ length: 5000 }, (_, i) => `line ${i}`).join("\n")
-    const result = truncateHead(input)
-    expect(result.wasTruncated).toBe(true)
-    expect(result.content).toContain("[Output truncated:")
-    expect(result.originalLines).toBe(5000)
-  })
+    const input = Array.from({ length: 5000 }, (_, i) => `line ${i}`).join("\n");
+    const result = truncateHead(input);
+    expect(result.wasTruncated).toBe(true);
+    expect(result.content).toContain("[Output truncated:");
+    expect(result.originalLines).toBe(5000);
+  });
 
   it("never cuts mid-line", () => {
     // Generate content that exceeds MAX_BYTES mid-line
     // Verify the cut happens at a line boundary
-  })
-})
+  });
+});
 ```
 
 **Functions that must have unit tests:**
 
-| Module | Functions |
-|--------|-----------|
-| `providers/cost.ts` | `calculateCost`, `addUsage` |
-| `providers/models.ts` | `getModelMetadata` (known model, unknown model) |
-| `providers/partial-json.ts` | `parsePartialJson`, `closeBrackets` |
-| `providers/retry.ts` | `isRetryable` |
-| `tools/truncation.ts` | `truncateHead`, `truncateTail` |
-| `tools/validation.ts` | `validateArgs` (valid, missing required, wrong type) |
-| `tools/edit.ts` | edit logic (unique match, no match, multiple matches, `replace_all`) |
-| `security/path-validation.ts` | `validatePath` (within cwd, outside cwd, blocked files, blocked dirs) |
-| `security/command-detection.ts` | `checkCommand` (safe, blocked, requires confirmation) |
-| `security/secrets-detection.ts` | `containsSecrets` (API keys, tokens, false positives) |
-| `skills/parser.ts` | `parseFrontmatter` (with frontmatter, without, malformed) |
-| `agent/context-tracker.ts` | `isContextExhausted`, `estimateTokens` |
-| `config/loader.ts` | `loadConfig` (default, valid, invalid provider, unknown model) |
+| Module                          | Functions                                                             |
+| ------------------------------- | --------------------------------------------------------------------- |
+| `providers/cost.ts`             | `calculateCost`, `addUsage`                                           |
+| `providers/models.ts`           | `getModelMetadata` (known model, unknown model)                       |
+| `providers/partial-json.ts`     | `parsePartialJson`, `closeBrackets`                                   |
+| `providers/retry.ts`            | `isRetryable`                                                         |
+| `tools/truncation.ts`           | `truncateHead`, `truncateTail`                                        |
+| `tools/validation.ts`           | `validateArgs` (valid, missing required, wrong type)                  |
+| `tools/edit.ts`                 | edit logic (unique match, no match, multiple matches, `replace_all`)  |
+| `security/path-validation.ts`   | `validatePath` (within cwd, outside cwd, blocked files, blocked dirs) |
+| `security/command-detection.ts` | `checkCommand` (safe, blocked, requires confirmation)                 |
+| `security/secrets-detection.ts` | `containsSecrets` (API keys, tokens, false positives)                 |
+| `skills/parser.ts`              | `parseFrontmatter` (with frontmatter, without, malformed)             |
+| `agent/context-tracker.ts`      | `isContextExhausted`, `estimateTokens`                                |
+| `config/loader.ts`              | `loadConfig` (default, valid, invalid provider, unknown model)        |
 
 ### Integration Tests (Component Boundaries)
 
@@ -1878,78 +1957,83 @@ and temporary file systems.
 
 ```typescript
 // src/agent/loop.test.ts
-import { describe, expect, it } from "bun:test"
-import { agentLoop } from "./loop"
+import { describe, expect, it } from "bun:test";
+import { agentLoop } from "./loop";
 
 function createMockProvider(responses: AssistantMessage[]): Provider {
-  let callIndex = 0
+  let callIndex = 0;
   return {
     id: "anthropic",
     async *stream() {
-      const response = responses[callIndex++]
+      const response = responses[callIndex++];
       // Emit StreamEvents that reconstruct the response
-      yield { type: "message_start" }
+      yield { type: "message_start" };
       for (const block of response.content) {
         if (block.type === "text") {
-          yield { type: "text_delta", text: block.text }
+          yield { type: "text_delta", text: block.text };
         }
         if (block.type === "tool_call") {
-          yield { type: "tool_call_start", id: block.id, name: block.name }
-          yield { type: "tool_call_delta", arguments: JSON.stringify(block.arguments) }
-          yield { type: "tool_call_end" }
+          yield { type: "tool_call_start", id: block.id, name: block.name };
+          yield { type: "tool_call_delta", arguments: JSON.stringify(block.arguments) };
+          yield { type: "tool_call_end" };
         }
       }
-      yield { type: "message_end", usage: response.usage, stopReason: response.stopReason }
+      yield { type: "message_end", usage: response.usage, stopReason: response.stopReason };
     },
-  }
+  };
 }
 
 describe("agentLoop", () => {
   it("terminates when LLM returns no tool calls", async () => {
     const provider = createMockProvider([
-      { role: "assistant", content: [{ type: "text", text: "Hello" }], usage: { inputTokens: 100, outputTokens: 10 }, stopReason: "stop" },
-    ])
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Hello" }],
+        usage: { inputTokens: 100, outputTokens: 10 },
+        stopReason: "stop",
+      },
+    ]);
 
     const result = await agentLoop({
       agent: AGENTS.build,
       provider,
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       messages: [{ role: "user", content: "Hi" }],
       systemPrompt: "You are helpful",
       tools: [],
       maxTurns: 10,
-    })
+    });
 
-    expect(result.turns).toBe(1)
-  })
+    expect(result.turns).toBe(1);
+  });
 
   it("executes tool calls and loops back", async () => {
     // First response: tool call → second response: text only
     // Verify: 2 turns, tool was executed, result appended
-  })
+  });
 
   it("stops when context limit is exceeded", async () => {
     // Mock provider that returns high inputTokens
     // Verify: loop breaks, context_limit_reached event emitted
-  })
+  });
 
   it("stops on abort signal", async () => {
-    const controller = new AbortController()
-    controller.abort()
+    const controller = new AbortController();
+    controller.abort();
     // Verify: loop exits immediately with 0 turns
-  })
-})
+  });
+});
 ```
 
 **Integration boundaries to test:**
 
-| Test file | What it covers |
-|-----------|---------------|
-| `agent/loop.test.ts` | Loop termination, tool execution, context limit, abort |
-| `agent/stream.test.ts` | `streamResponse()` assembles events into AssistantMessage correctly |
-| `agent/execute.test.ts` | Tool validation errors, permission denied, sequential execution |
-| `security/permissions.test.ts` | Batch prompting, session memory, denied-tool-still-runs-others |
-| `session/manager.test.ts` | Create → append → load roundtrip, list by cwd, sort order |
+| Test file                      | What it covers                                                      |
+| ------------------------------ | ------------------------------------------------------------------- |
+| `agent/loop.test.ts`           | Loop termination, tool execution, context limit, abort              |
+| `agent/stream.test.ts`         | `streamResponse()` assembles events into AssistantMessage correctly |
+| `agent/execute.test.ts`        | Tool validation errors, permission denied, sequential execution     |
+| `security/permissions.test.ts` | Batch prompting, session memory, denied-tool-still-runs-others      |
+| `session/manager.test.ts`      | Create → append → load roundtrip, list by cwd, sort order           |
 
 ### End-to-End Test
 
@@ -1957,7 +2041,7 @@ One test that wires up the entire system with a mock provider:
 
 ```typescript
 // src/e2e.test.ts
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "bun:test";
 
 describe("end-to-end", () => {
   it("handles a complete user interaction", async () => {
@@ -1966,8 +2050,8 @@ describe("end-to-end", () => {
     // 3. Run the full CLI flow programmatically (not readline — call the inner function)
     // 4. Verify: file was read, response was generated, session was persisted
     // 5. Load the session from disk, verify it roundtrips
-  })
-})
+  });
+});
 ```
 
 ### Test Helpers
@@ -1978,13 +2062,13 @@ Shared test utilities to reduce boilerplate:
 // src/test-helpers.ts
 
 // Creates a temp directory with files, returns cleanup function
-function createTempProject(files: Record<string, string>): { cwd: string; cleanup: () => void }
+function createTempProject(files: Record<string, string>): { cwd: string; cleanup: () => void };
 
 // Creates a mock provider from a sequence of responses
-function createMockProvider(responses: AssistantMessage[]): Provider
+function createMockProvider(responses: AssistantMessage[]): Provider;
 
 // Creates a mock tool that records calls and returns a fixed result
-function createMockTool(name: string, result: ToolResult): ToolDefinition & { calls: unknown[] }
+function createMockTool(name: string, result: ToolResult): ToolDefinition & { calls: unknown[] };
 ```
 
 ---
@@ -1998,12 +2082,12 @@ provider interactions and internal state to stderr so they don't interfere with
 normal stdout output.
 
 ```typescript
-const DEBUG = process.env.DEBUG === "tokenius" || process.argv.includes("--debug")
+const DEBUG = process.env.DEBUG === "tokenius" || process.argv.includes("--debug");
 
 function debug(category: string, ...args: unknown[]): void {
-  if (!DEBUG) return
-  const timestamp = new Date().toISOString().slice(11, 23)  // HH:MM:SS.mmm
-  console.error(`[${timestamp}] [${category}]`, ...args)
+  if (!DEBUG) return;
+  const timestamp = new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
+  console.error(`[${timestamp}] [${category}]`, ...args);
 }
 ```
 
@@ -2011,19 +2095,19 @@ Usage throughout the codebase:
 
 ```typescript
 // In provider — log raw request/response
-debug("provider", "request", { model, messageCount: context.messages.length })
-debug("provider", "response", { usage, stopReason })
+debug("provider", "request", { model, messageCount: context.messages.length });
+debug("provider", "response", { usage, stopReason });
 
 // In agent loop — log turn progression
-debug("loop", `turn ${turn}/${maxTurns}`, { inputTokens: tracker.lastKnownInputTokens })
+debug("loop", `turn ${turn}/${maxTurns}`, { inputTokens: tracker.lastKnownInputTokens });
 
 // In tools — log execution
-debug("tool", `executing ${tool.name}`, { args: call.arguments })
-debug("tool", `result ${tool.name}`, { chars: result.content.length, isError: result.isError })
+debug("tool", `executing ${tool.name}`, { args: call.arguments });
+debug("tool", `result ${tool.name}`, { chars: result.content.length, isError: result.isError });
 
 // In security — log decisions
-debug("security", `path check: ${filePath}`, { valid, reason })
-debug("security", `command check: ${command.slice(0, 80)}`, { allowed, requiresConfirmation })
+debug("security", `path check: ${filePath}`, { valid, reason });
+debug("security", `command check: ${command.slice(0, 80)}`, { allowed, requiresConfirmation });
 ```
 
 ### `/usage` Command — Detailed Session Stats
@@ -2041,20 +2125,20 @@ function printDetailedUsage(session: Session, model: string): void {
     cacheWriteTokens: 0,
     turns: 0,
     toolCalls: 0,
-  }
+  };
 
   for (const msg of session.messages) {
     if (msg.role === "assistant" && msg.usage) {
-      totals.inputTokens += msg.usage.inputTokens
-      totals.outputTokens += msg.usage.outputTokens
-      totals.cacheReadTokens += msg.usage.cacheReadTokens ?? 0
-      totals.cacheWriteTokens += msg.usage.cacheWriteTokens ?? 0
-      totals.turns++
-      totals.toolCalls += msg.content.filter((b) => b.type === "tool_call").length
+      totals.inputTokens += msg.usage.inputTokens;
+      totals.outputTokens += msg.usage.outputTokens;
+      totals.cacheReadTokens += msg.usage.cacheReadTokens ?? 0;
+      totals.cacheWriteTokens += msg.usage.cacheWriteTokens ?? 0;
+      totals.turns++;
+      totals.toolCalls += msg.content.filter((b) => b.type === "tool_call").length;
     }
   }
 
-  const cost = calculateCost(model, totals)
+  const cost = calculateCost(model, totals);
 
   // Display:
   //   Session: abc123 (Fix auth bug)
@@ -2073,13 +2157,13 @@ situational awareness about when the session will hit its limit.
 
 ```typescript
 function formatContextIndicator(tracker: ContextTracker): string {
-  const used = Math.round(tracker.lastKnownInputTokens / 1000)
-  const total = Math.round(tracker.contextWindow / 1000)
-  const pct = Math.round((tracker.lastKnownInputTokens / tracker.contextWindow) * 100)
+  const used = Math.round(tracker.lastKnownInputTokens / 1000);
+  const total = Math.round(tracker.contextWindow / 1000);
+  const pct = Math.round((tracker.lastKnownInputTokens / tracker.contextWindow) * 100);
 
   // Color based on fullness: green < 50%, yellow 50-80%, red > 80%
-  const color = pct < 50 ? chalk.green : pct < 80 ? chalk.yellow : chalk.red
-  return color(`[${used}k / ${total}k tokens]`)
+  const color = pct < 50 ? chalk.green : pct < 80 ? chalk.yellow : chalk.red;
+  return color(`[${used}k / ${total}k tokens]`);
 }
 
 // Shown after each turn in the renderer:
@@ -2136,6 +2220,7 @@ jobs:
 ### Branch Protection
 
 After the CI workflow is live, enable branch protection on `main`:
+
 - Require CI to pass before merge
 - Require PR reviews (even if self-reviewed — the habit matters for portfolio)
 
@@ -2151,11 +2236,11 @@ The `package.json` `bin` field makes the package runnable as a CLI.
   "description": "A lightweight coding agent harness. Single-process TypeScript + Bun.",
   "keywords": ["ai", "agent", "coding-assistant", "cli", "llm"],
   "bin": {
-    "tokenius": "./dist/index.js"
+    "tokenius": "./dist/index.js",
   },
   "files": ["dist"],
   "type": "module",
-  "license": "MIT"
+  "license": "MIT",
 }
 ```
 
@@ -2182,9 +2267,9 @@ git clone ... && cd tokenius && bun install && bun link
 ```typescript
 // src/cli/args.ts
 interface CLIArgs {
-  version: boolean    // --version
-  help: boolean       // --help
-  debug: boolean      // --debug
+  version: boolean; // --version
+  help: boolean; // --help
+  debug: boolean; // --debug
 }
 
 function parseArgs(): CLIArgs {
@@ -2192,19 +2277,19 @@ function parseArgs(): CLIArgs {
     version: process.argv.includes("--version"),
     help: process.argv.includes("--help"),
     debug: process.argv.includes("--debug"),
-  }
+  };
 }
 
 // In main():
-const args = parseArgs()
+const args = parseArgs();
 if (args.version) {
-  const pkg = await Bun.file("package.json").json()
-  console.log(`tokenius v${pkg.version}`)
-  process.exit(0)
+  const pkg = await Bun.file("package.json").json();
+  console.log(`tokenius v${pkg.version}`);
+  process.exit(0);
 }
 if (args.help) {
-  printHelp()
-  process.exit(0)
+  printHelp();
+  process.exit(0);
 }
 ```
 
@@ -2246,6 +2331,7 @@ Link to docs/DECISIONS.md for the full rationale.
 ```
 
 **Key rules:**
+
 - Demo goes above the fold (before install instructions)
 - No walls of text — use the architecture doc for details, keep README scannable
 - Show a real interaction, not a contrived hello-world
@@ -2276,7 +2362,7 @@ Sleep 8s
 
 ### docs/DECISIONS.md
 
-Document the *why* behind every non-obvious design choice. This is what separates
+Document the _why_ behind every non-obvious design choice. This is what separates
 "I followed a tutorial" from "I thought deeply about tradeoffs." Each entry follows
 the same structure:
 
@@ -2292,6 +2378,7 @@ with a cheap model and replacing them.
 **Decision:** Hard stop. The session ends. User starts fresh or uses /clear.
 
 **Rationale:**
+
 - Compaction requires a cut-point heuristic (which messages to keep?) — easy to get wrong
 - LLM summarization loses detail, especially tool results and code snippets
 - Cheap-model routing adds a second model dependency and cost tracking path
@@ -2304,17 +2391,17 @@ The user must develop a habit of scoped sessions.
 
 **Decisions to document:**
 
-| Decision | Key tradeoff |
-|----------|-------------|
-| No compaction | Simplicity vs. session length |
-| Anthropic-native canonical format | Fewer conversions vs. vendor coupling |
-| Sequential tool execution | Simplicity vs. throughput |
-| JSONL persistence | Simplicity vs. queryability |
-| No plugin system for tools | Focus vs. extensibility |
-| Security-by-design (wired into tools) | Upfront effort vs. bolt-on risk |
-| Direct SDK usage (no LangChain) | Control vs. convenience |
-| Hard-coded model metadata | Simplicity vs. auto-discovery |
-| Bun-only runtime | Speed + batteries vs. Node.js ecosystem |
+| Decision                              | Key tradeoff                            |
+| ------------------------------------- | --------------------------------------- |
+| No compaction                         | Simplicity vs. session length           |
+| Anthropic-native canonical format     | Fewer conversions vs. vendor coupling   |
+| Sequential tool execution             | Simplicity vs. throughput               |
+| JSONL persistence                     | Simplicity vs. queryability             |
+| No plugin system for tools            | Focus vs. extensibility                 |
+| Security-by-design (wired into tools) | Upfront effort vs. bolt-on risk         |
+| Direct SDK usage (no LangChain)       | Control vs. convenience                 |
+| Hard-coded model metadata             | Simplicity vs. auto-discovery           |
+| Bun-only runtime                      | Speed + batteries vs. Node.js ecosystem |
 
 ### `/replay` Command
 
@@ -2323,36 +2410,38 @@ or making API requests. Useful for demos and reviewing past sessions.
 
 ```typescript
 async function replaySession(sessionId: string): Promise<void> {
-  const session = loadSession(sessionId)
+  const session = loadSession(sessionId);
 
   for (const msg of session.messages) {
     switch (msg.role) {
       case "user":
-        console.log(chalk.blue(`\n> ${msg.content}\n`))
-        break
+        console.log(chalk.blue(`\n> ${msg.content}\n`));
+        break;
       case "assistant":
         for (const block of msg.content) {
           if (block.type === "text") {
             // Simulate streaming with a small delay per character
             for (const char of block.text) {
-              process.stdout.write(char)
-              await Bun.sleep(5)  // 5ms per char — fast but visible
+              process.stdout.write(char);
+              await Bun.sleep(5); // 5ms per char — fast but visible
             }
           }
           if (block.type === "tool_call") {
-            console.log(chalk.cyan(`\n> ${block.name}`))
-            console.log(chalk.dim(JSON.stringify(block.arguments, null, 2)))
+            console.log(chalk.cyan(`\n> ${block.name}`));
+            console.log(chalk.dim(JSON.stringify(block.arguments, null, 2)));
           }
         }
-        break
+        break;
       case "tool_result":
-        const color = msg.isError ? chalk.red : chalk.green
-        console.log(color(`  ${msg.content.slice(0, 200)}`))
-        break
+        const color = msg.isError ? chalk.red : chalk.green;
+        console.log(color(`  ${msg.content.slice(0, 200)}`));
+        break;
     }
   }
 
-  console.log(chalk.dim(`\nReplayed ${session.messages.length} messages from session ${sessionId}`))
+  console.log(
+    chalk.dim(`\nReplayed ${session.messages.length} messages from session ${sessionId}`),
+  );
 }
 ```
 
@@ -2365,17 +2454,17 @@ into each tool as it's built — not bolted on after the fact.
 
 ### Sprint 1: Foundation (days 1-3)
 
-| # | Task | Test |
-|---|------|------|
-| 1.1 | Define all core types in `src/types.ts` | — (types only) |
-| 1.2 | Model metadata in `src/providers/models.ts` | `getModelMetadata` known + unknown |
-| 1.3 | Cost calculation in `src/providers/cost.ts` | `calculateCost`, `addUsage` |
-| 1.4 | Provider types in `src/providers/types.ts` | — (types only) |
-| 1.5 | Anthropic provider in `src/providers/anthropic.ts` | — (tested via smoke test) |
-| 1.6 | Provider registry in `src/providers/registry.ts` | — (trivial Map wrapper) |
-| 1.7 | Retry logic in `src/providers/retry.ts` | `isRetryable` unit tests |
-| 1.8 | Partial JSON parser in `src/providers/partial-json.ts` | Extensive edge case tests |
-| 1.9 | Smoke test — hardcoded prompt → stream to stdout | Manual verification |
+| #   | Task                                                   | Test                               |
+| --- | ------------------------------------------------------ | ---------------------------------- |
+| 1.1 | Define all core types in `src/types.ts`                | — (types only)                     |
+| 1.2 | Model metadata in `src/providers/models.ts`            | `getModelMetadata` known + unknown |
+| 1.3 | Cost calculation in `src/providers/cost.ts`            | `calculateCost`, `addUsage`        |
+| 1.4 | Provider types in `src/providers/types.ts`             | — (types only)                     |
+| 1.5 | Anthropic provider in `src/providers/anthropic.ts`     | — (tested via smoke test)          |
+| 1.6 | Provider registry in `src/providers/registry.ts`       | — (trivial Map wrapper)            |
+| 1.7 | Retry logic in `src/providers/retry.ts`                | `isRetryable` unit tests           |
+| 1.8 | Partial JSON parser in `src/providers/partial-json.ts` | Extensive edge case tests          |
+| 1.9 | Smoke test — hardcoded prompt → stream to stdout       | Manual verification                |
 
 **Milestone:** Can send a prompt to Claude and stream the response to the terminal.
 
@@ -2383,114 +2472,114 @@ into each tool as it's built — not bolted on after the fact.
 
 Security is built alongside each tool, not retroactively.
 
-| # | Task | Test |
-|---|------|------|
-| 2.1 | Tool types in `src/tools/types.ts` | — (types only) |
-| 2.2 | Tool registry in `src/tools/registry.ts` | Schema sorting determinism |
-| 2.3 | Truncation in `src/tools/truncation.ts` | Head/tail, limits, mid-line safety |
-| 2.4 | Arg validation in `src/tools/validation.ts` | Valid, missing required, wrong type |
-| 2.5 | Path validation in `src/security/path-validation.ts` | Within cwd, outside, blocked files/dirs |
-| 2.6 | Secrets detection in `src/security/secrets-detection.ts` | API keys, tokens, false positives |
-| 2.7 | Command detection in `src/security/command-detection.ts` | Safe, blocked, confirmation patterns |
-| 2.8 | `read` tool (with path validation, binary detection) | Read file, offset/limit, binary, blocked path |
-| 2.9 | `grep` tool (with path validation) | Pattern match, include filter, rg fallback |
-| 2.10 | `glob` tool (with path validation) | Pattern match, sorted output |
-| 2.11 | `bash` tool (with command detection, timeout) | Execution, timeout kill, blocked command |
-| 2.12 | `write` tool (with path validation, secrets detection) | Create, overwrite, mkdir -p, blocked secret |
-| 2.13 | `edit` tool (with path + secrets, replace_all) | Unique match, no match, multi-match, replace_all |
+| #    | Task                                                     | Test                                             |
+| ---- | -------------------------------------------------------- | ------------------------------------------------ |
+| 2.1  | Tool types in `src/tools/types.ts`                       | — (types only)                                   |
+| 2.2  | Tool registry in `src/tools/registry.ts`                 | Schema sorting determinism                       |
+| 2.3  | Truncation in `src/tools/truncation.ts`                  | Head/tail, limits, mid-line safety               |
+| 2.4  | Arg validation in `src/tools/validation.ts`              | Valid, missing required, wrong type              |
+| 2.5  | Path validation in `src/security/path-validation.ts`     | Within cwd, outside, blocked files/dirs          |
+| 2.6  | Secrets detection in `src/security/secrets-detection.ts` | API keys, tokens, false positives                |
+| 2.7  | Command detection in `src/security/command-detection.ts` | Safe, blocked, confirmation patterns             |
+| 2.8  | `read` tool (with path validation, binary detection)     | Read file, offset/limit, binary, blocked path    |
+| 2.9  | `grep` tool (with path validation)                       | Pattern match, include filter, rg fallback       |
+| 2.10 | `glob` tool (with path validation)                       | Pattern match, sorted output                     |
+| 2.11 | `bash` tool (with command detection, timeout)            | Execution, timeout kill, blocked command         |
+| 2.12 | `write` tool (with path validation, secrets detection)   | Create, overwrite, mkdir -p, blocked secret      |
+| 2.13 | `edit` tool (with path + secrets, replace_all)           | Unique match, no match, multi-match, replace_all |
 
 **Milestone:** All 6 core tools work with security enforced. Can read, write, search, and execute.
 
 ### Sprint 3: Agent Loop (days 8-10)
 
-| # | Task | Test |
-|---|------|------|
-| 3.1 | Context tracker in `src/agent/context-tracker.ts` | `isContextExhausted`, `estimateTokens` |
-| 3.2 | Stream accumulator in `src/agent/stream.ts` | Events → AssistantMessage assembly |
-| 3.3 | Tool execution in `src/agent/execute.ts` | Validation errors, permission denied, sequential |
-| 3.4 | Permission prompts in `src/security/permissions.ts` | Batch prompting, session memory |
-| 3.5 | Agent loop in `src/agent/loop.ts` | Termination, tool exec, context limit, abort |
-| 3.6 | Agent configs in `src/agent/agents.ts` | — (static data) |
-| 3.7 | System prompt builder in `src/agent/system-prompt.ts` | With/without AGENTS.md, with/without skills |
-| 3.8 | `spawn_agent` tool in `src/tools/spawn-agent.ts` | Subagent invocation, cost display |
-| 3.9 | End-to-end test with mock provider | Full loop: user msg → tools → response → session |
+| #   | Task                                                  | Test                                             |
+| --- | ----------------------------------------------------- | ------------------------------------------------ |
+| 3.1 | Context tracker in `src/agent/context-tracker.ts`     | `isContextExhausted`, `estimateTokens`           |
+| 3.2 | Stream accumulator in `src/agent/stream.ts`           | Events → AssistantMessage assembly               |
+| 3.3 | Tool execution in `src/agent/execute.ts`              | Validation errors, permission denied, sequential |
+| 3.4 | Permission prompts in `src/security/permissions.ts`   | Batch prompting, session memory                  |
+| 3.5 | Agent loop in `src/agent/loop.ts`                     | Termination, tool exec, context limit, abort     |
+| 3.6 | Agent configs in `src/agent/agents.ts`                | — (static data)                                  |
+| 3.7 | System prompt builder in `src/agent/system-prompt.ts` | With/without AGENTS.md, with/without skills      |
+| 3.8 | `spawn_agent` tool in `src/tools/spawn-agent.ts`      | Subagent invocation, cost display                |
+| 3.9 | End-to-end test with mock provider                    | Full loop: user msg → tools → response → session |
 
 **Milestone:** The agent loop works end-to-end with a mock provider. Tool calls, security, context tracking all wired together.
 
 ### Sprint 4: Persistence (days 11-12)
 
-| # | Task | Test |
-|---|------|------|
-| 4.1 | Session types in `src/session/types.ts` | — (types only) |
-| 4.2 | Session manager in `src/session/manager.ts` | Create → append → load roundtrip, list, sort |
-| 4.3 | Session title generation in `src/session/title.ts` | — (LLM call, tested manually) |
-| 4.4 | First-run `.gitignore` hint | — (manual verification) |
+| #   | Task                                               | Test                                         |
+| --- | -------------------------------------------------- | -------------------------------------------- |
+| 4.1 | Session types in `src/session/types.ts`            | — (types only)                               |
+| 4.2 | Session manager in `src/session/manager.ts`        | Create → append → load roundtrip, list, sort |
+| 4.3 | Session title generation in `src/session/title.ts` | — (LLM call, tested manually)                |
+| 4.4 | First-run `.gitignore` hint                        | — (manual verification)                      |
 
 **Milestone:** Sessions persist to disk and can be loaded back.
 
 ### Sprint 5: Config & Skills (days 13-14)
 
-| # | Task | Test |
-|---|------|------|
-| 5.1 | Config loader in `src/config/loader.ts` | Default, valid, invalid provider, unknown model |
-| 5.2 | API key resolution in `src/config/api-keys.ts` | Present, missing |
-| 5.3 | AGENTS.md loader in `src/config/agents-md.ts` | Present, missing |
-| 5.4 | Skill parser in `src/skills/parser.ts` | With frontmatter, without, malformed |
-| 5.5 | Skill discovery in `src/skills/discovery.ts` | Directory with skills, empty, missing |
-| 5.6 | Skill invocation | `/skill:name` → prepended content |
+| #   | Task                                           | Test                                            |
+| --- | ---------------------------------------------- | ----------------------------------------------- |
+| 5.1 | Config loader in `src/config/loader.ts`        | Default, valid, invalid provider, unknown model |
+| 5.2 | API key resolution in `src/config/api-keys.ts` | Present, missing                                |
+| 5.3 | AGENTS.md loader in `src/config/agents-md.ts`  | Present, missing                                |
+| 5.4 | Skill parser in `src/skills/parser.ts`         | With frontmatter, without, malformed            |
+| 5.5 | Skill discovery in `src/skills/discovery.ts`   | Directory with skills, empty, missing           |
+| 5.6 | Skill invocation                               | `/skill:name` → prepended content               |
 
 **Milestone:** Config, project rules, and skills all load and integrate with the agent.
 
 ### Sprint 6: CLI (days 15-17)
 
-| # | Task | Test |
-|---|------|------|
-| 6.1 | CLI args parser in `src/cli/args.ts` | `--version`, `--help`, `--debug` |
-| 6.2 | Streaming renderer in `src/cli/renderer.ts` | — (visual, tested manually) |
-| 6.3 | Context window indicator | — (visual, tested manually) |
-| 6.4 | Slash commands in `src/cli/commands.ts` | — (tested via integration) |
-| 6.5 | Debug mode in `src/debug.ts` | — (tested via `--debug` flag) |
-| 6.6 | Main CLI loop in `src/cli/index.ts` | — (tested manually) |
-| 6.7 | Bootstrap in `src/index.ts` | — (entry point wiring) |
-| 6.8 | Startup banner (model, provider, cwd, session ID) | — (visual) |
+| #   | Task                                              | Test                             |
+| --- | ------------------------------------------------- | -------------------------------- |
+| 6.1 | CLI args parser in `src/cli/args.ts`              | `--version`, `--help`, `--debug` |
+| 6.2 | Streaming renderer in `src/cli/renderer.ts`       | — (visual, tested manually)      |
+| 6.3 | Context window indicator                          | — (visual, tested manually)      |
+| 6.4 | Slash commands in `src/cli/commands.ts`           | — (tested via integration)       |
+| 6.5 | Debug mode in `src/debug.ts`                      | — (tested via `--debug` flag)    |
+| 6.6 | Main CLI loop in `src/cli/index.ts`               | — (tested manually)              |
+| 6.7 | Bootstrap in `src/index.ts`                       | — (entry point wiring)           |
+| 6.8 | Startup banner (model, provider, cwd, session ID) | — (visual)                       |
 
 **Milestone:** Fully functional CLI. Can have real conversations with the agent.
 
 ### Sprint 7: Polish (days 18-20)
 
-| # | Task | Test |
-|---|------|------|
-| 7.1 | OpenAI provider in `src/providers/openai.ts` | — (tested with real API) |
-| 7.2 | `/usage` command (detailed stats) | — (tested manually) |
-| 7.3 | `/replay` command | — (tested manually) |
-| 7.4 | Error handling pass — network, empty responses, abort | Edge case tests |
-| 7.5 | Missing ripgrep graceful fallback | Fallback grep works |
-| 7.6 | First-run experience — missing API key message | — (tested manually) |
+| #   | Task                                                  | Test                     |
+| --- | ----------------------------------------------------- | ------------------------ |
+| 7.1 | OpenAI provider in `src/providers/openai.ts`          | — (tested with real API) |
+| 7.2 | `/usage` command (detailed stats)                     | — (tested manually)      |
+| 7.3 | `/replay` command                                     | — (tested manually)      |
+| 7.4 | Error handling pass — network, empty responses, abort | Edge case tests          |
+| 7.5 | Missing ripgrep graceful fallback                     | Fallback grep works      |
+| 7.6 | First-run experience — missing API key message        | — (tested manually)      |
 
 **Milestone:** Production-quality CLI with two providers and polished error handling.
 
 ### Sprint 8: Documentation & CI (days 21-23)
 
-| # | Task |
-|---|------|
-| 8.1 | GitHub Actions CI workflow (`.github/workflows/ci.yml`) |
-| 8.2 | Branch protection on `main` |
-| 8.3 | `package.json` — bin, files, keywords, description |
+| #   | Task                                                          |
+| --- | ------------------------------------------------------------- |
+| 8.1 | GitHub Actions CI workflow (`.github/workflows/ci.yml`)       |
+| 8.2 | Branch protection on `main`                                   |
+| 8.3 | `package.json` — bin, files, keywords, description            |
 | 8.4 | README.md — pitch, architecture diagram, install, quick start |
-| 8.5 | Terminal demo recording (vhs or asciinema) |
-| 8.6 | `docs/DECISIONS.md` — all 9 design decision entries |
+| 8.5 | Terminal demo recording (vhs or asciinema)                    |
+| 8.6 | `docs/DECISIONS.md` — all 9 design decision entries           |
 
 **Milestone:** Portfolio-ready. Anyone can clone, install, use, and understand why it works the way it does.
 
 ### Sprint 9: TUI (future)
 
-| # | Task |
-|---|------|
-| 9.1 | Choose TUI framework (Ink or custom) |
-| 9.2 | Spinners during LLM response + tool execution |
-| 9.3 | Syntax highlighting for code blocks |
+| #   | Task                                            |
+| --- | ----------------------------------------------- |
+| 9.1 | Choose TUI framework (Ink or custom)            |
+| 9.2 | Spinners during LLM response + tool execution   |
+| 9.3 | Syntax highlighting for code blocks             |
 | 9.4 | Split view (input bottom, output scrolling top) |
-| 9.5 | Permission confirmation dialogs as proper UI |
+| 9.5 | Permission confirmation dialogs as proper UI    |
 
 ---
 
