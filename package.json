@@ -1,6 +1,8 @@
 {
-  "name": "bunbase",
+  "name": "tokenius",
+  "version": "0.1.0",
   "private": true,
+  "description": "A streaming-first AI coding agent built from scratch — direct SDK integration, tool-driven architecture, and zero framework bloat.",
   "license": "MIT",
   "type": "module",
   "module": "src/index.ts",
