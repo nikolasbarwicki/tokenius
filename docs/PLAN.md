@@ -585,9 +585,19 @@ interface ToolDefinition<TParams = Record<string, unknown>> {
   execute: (params: TParams, context: ToolContext) => Promise<ToolResult>;
 }
 
+interface ConfirmRequest {
+  tool: string;
+  description: string; // Human-readable preview of what will happen
+  reason: string; // Why confirmation is needed
+}
+
 interface ToolContext {
   cwd: string; // Working directory
   signal: AbortSignal; // Cancellation
+  // Confirmation hook for destructive operations (bash, etc.). In Sprint 2
+  // this defaults to always-allow when undefined; Sprint 3 wires it to a
+  // real user prompt via src/security/permissions.ts.
+  confirm?: (request: ConfirmRequest) => Promise<boolean>;
 }
 
 interface ToolResult {
@@ -595,11 +605,29 @@ interface ToolResult {
   isError?: boolean;
 }
 
-type JsonSchema = {
+// Deliberately restricted to the shapes we actually use. Keeps the validator
+// small and schemas easy to read. Extend only when a new tool needs it.
+type JsonSchemaPrimitive = "string" | "number" | "integer" | "boolean";
+
+type JsonSchemaProperty =
+  | {
+      type: JsonSchemaPrimitive;
+      description?: string;
+      enum?: readonly string[];
+      minimum?: number;
+      maximum?: number;
+    }
+  | {
+      type: "array";
+      description?: string;
+      items: { type: JsonSchemaPrimitive };
+    };
+
+interface JsonSchema {
   type: "object";
-  properties: Record<string, unknown>;
-  required?: string[];
-};
+  properties: Record<string, JsonSchemaProperty>;
+  required?: readonly string[];
+}
 ```
 
 ### Tool Registry
@@ -665,12 +693,17 @@ Use offset/limit parameters or grep to find specific content.]
 
 ### Argument Validation
 
-Use Bun-compatible JSON Schema validation (AJV or a lightweight alternative):
+Because `JsonSchema` is restricted to primitives + single-type arrays (with
+optional `enum`/`minimum`/`maximum`), we hand-roll the validator rather than
+pulling in AJV. ~90 lines of code, zero dependencies, structured errors:
 
 ```typescript
-function validateArgs(schema: JsonSchema, args: unknown): { valid: boolean; errors?: string[] } {
-  // Validate args against JSON schema
-  // Return structured errors for the LLM
+function validateArgs(schema: JsonSchema, args: unknown): { valid: boolean; errors: string[] } {
+  // 1. args must be a plain object
+  // 2. Every key in `required` must be present
+  // 3. Each property that IS declared must match its type (primitive / array-of-primitive)
+  // 4. enum / minimum / maximum constraints are enforced
+  // 5. Unknown properties are ignored (LLMs sometimes pad with extras)
 }
 ```
 
@@ -734,14 +767,15 @@ feedback and can retry.
 {
   name: "bash",
   parameters: {
-    command: string,      // Required. Shell command to run
-    timeout?: number,     // Max execution time in ms (default: 120_000)
+    command: string,       // Required. Shell command to run
+    timeout_ms?: number,   // Max execution time in ms (default: 120_000, max: 600_000)
   },
-  // Execution: Bun.spawn with shell
+  // Execution: Bun.spawn("/bin/sh", "-c", cmd) with cwd + env inherited
   // Output: combined stdout+stderr, shown to user AFTER completion (spinner while running)
   // Truncation: truncateTail (errors at bottom)
-  // Cleanup: kill process on timeout/abort
-  // Security: dangerous command detection (Layer 5)
+  // Cancellation: compose context.signal (Ctrl+C) with internal timeout signal via AbortSignal.any
+  // Security: dangerous command detection (Layer 5). Confirmation commands defer
+  //   to ToolContext.confirm; absent confirm defaults to allow (Sprint 2 permissive).
 }
 ```
 
@@ -751,11 +785,16 @@ feedback and can retry.
 {
   name: "grep",
   parameters: {
-    pattern: string,      // Required. Regex pattern
-    path?: string,        // Directory to search (default: cwd)
-    include?: string,     // Glob filter (e.g., "*.ts")
+    pattern: string,       // Required. Regex pattern (ripgrep/rust regex flavor)
+    path?: string,         // Directory to search (default: cwd)
+    include?: string,      // Glob filter (e.g., "*.ts")
+    ignore_case?: boolean, // Case-insensitive match. Default: false
+    files_only?: boolean,  // Return paths only, no line content. Default: false
   },
-  // Implementation: Bun.spawn ripgrep (rg) if available, fallback to manual
+  // Implementation: requires ripgrep (rg). Returns a clear install hint if missing.
+  //   No manual fallback — the "degraded" code path would be slower and worse.
+  // Output: `path:line:match` per hit (or just `path` with files_only)
+  // Exit codes: 0 = matches, 1 = no matches (not an error), 2 = error
   // Truncation: truncateHead
 }
 ```
@@ -768,9 +807,11 @@ feedback and can retry.
   parameters: {
     pattern: string,      // Required. Glob pattern (e.g., "src/**/*.ts")
     path?: string,        // Base directory (default: cwd)
+    dot?: boolean,        // Include dotfiles/dotdirs (.github, .claude). Default: false
   },
-  // Implementation: Bun.Glob
-  // Returns: sorted file paths
+  // Implementation: Bun.Glob.scan
+  // Returns: sorted relative paths. Belt-and-suspenders relative check drops any
+  //   match that escapes the search root (defense against symlink tricks).
   // Truncation: truncateHead
 }
 ```
@@ -1211,40 +1252,59 @@ function buildSystemPrompt(agent: AgentConfig, cwd: string): string {
 
 ### Path Validation
 
-All file operations pass through path validation:
+All file operations pass through path validation. Two subtleties make this
+harder than it looks:
+
+1. **Symlink canonicalization.** `cwd.startsWith(target)` is a naive string
+   compare. On macOS `/tmp` is a symlink to `/private/tmp`; resolving with
+   `realpath` makes both sides comparable.
+2. **Non-existent targets.** The `write` tool creates new files. `realpath`
+   throws on paths that don't exist, so we canonicalize the deepest existing
+   ancestor and reattach the tail.
 
 ```typescript
-function validatePath(
-  filePath: string,
-  cwd: string,
-): { valid: boolean; resolved: string; reason?: string } {
-  const resolved = resolve(cwd, filePath);
+interface PathValidationResult {
+  valid: boolean;
+  resolved: string; // Absolute path (realpath'd when the file exists)
+  reason?: string;
+}
 
-  // Must be within project directory (cwd or below)
-  if (!resolved.startsWith(cwd)) {
-    return { valid: false, resolved, reason: "Path outside project directory" };
+const BLOCKED_FILES = new Set([
+  ".env",
+  ".env.local",
+  ".env.production",
+  ".env.development",
+  "credentials.json",
+  "secrets.json",
+]);
+
+// Sensitive subpaths — matched as path segments, not substrings, so a repo
+// literally named "objects" wouldn't be flagged unless it's under .git/.
+const BLOCKED_SEGMENTS: readonly string[][] = [
+  [".git", "objects"],
+  [".git", "refs"],
+  ["node_modules", ".cache"],
+];
+
+function validatePath(filePath: string, cwd: string): PathValidationResult {
+  const target = isAbsolute(filePath) ? filePath : resolve(cwd, filePath);
+  const resolvedTarget = canonicalize(target); // realpath or best-effort
+  const resolvedCwd = canonicalize(cwd);
+
+  // Containment check via relative path — "..", or an absolute relative, means escape.
+  const rel = relative(resolvedCwd, resolvedTarget);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    return {
+      valid: false,
+      resolved: resolvedTarget,
+      reason: "path is outside the project directory",
+    };
   }
 
-  // Block sensitive files
-  const basename = path.basename(resolved);
-  const BLOCKED_FILES = [
-    ".env",
-    ".env.local",
-    ".env.production",
-    "credentials.json",
-    "secrets.json",
-  ];
-  if (BLOCKED_FILES.includes(basename)) {
-    return { valid: false, resolved, reason: `Access to ${basename} is blocked for security` };
+  if (BLOCKED_FILES.has(basename(resolvedTarget))) {
+    /* ... */
   }
-
-  // Block sensitive directories
-  const BLOCKED_DIRS = [".git/objects", ".git/refs", "node_modules/.cache"];
-  if (BLOCKED_DIRS.some((d) => resolved.includes(d))) {
-    return { valid: false, resolved, reason: "Access to this directory is blocked" };
-  }
-
-  return { valid: true, resolved };
+  // Segment-by-segment check against BLOCKED_SEGMENTS — prevents ".gitobjects"-style bypasses.
 }
 ```
 
@@ -1259,23 +1319,27 @@ interface CommandCheck {
   reason?: string;
 }
 
-const BLOCKED_PATTERNS = [
-  /\brm\s+(-[rf]+\s+)?\/(?!\w)/, // rm -rf / (root deletion)
-  /\bmkfs\b/, // Format filesystem
-  /\bdd\s+.*of=\/dev/, // Write to device
-  />\s*\/dev\/sd/, // Redirect to device
-  /\bcurl\b.*\|\s*\bsh\b/, // Pipe curl to shell
+const BLOCKED_PATTERNS: { pattern: RegExp; reason: string }[] = [
+  { pattern: /\brm\s+(?:-[a-zA-Z]*\s+)*\/(?!\w)/, reason: "rm targeting the filesystem root" },
+  { pattern: /\bmkfs\b/, reason: "filesystem format" },
+  { pattern: /\bdd\s+[^|&;]*of=\/dev\//, reason: "dd writing to a device" },
+  { pattern: />\s*\/dev\/[sh]d/, reason: "redirect to block device" },
+  { pattern: /\bcurl\b[^|&;]*\|\s*(?:sudo\s+)?(?:ba|z)?sh\b/, reason: "curl piped to shell" },
+  { pattern: /\bwget\b[^|&;]*\|\s*(?:sudo\s+)?(?:ba|z)?sh\b/, reason: "wget piped to shell" },
+  { pattern: /:\(\)\s*\{\s*:\|:&\s*\}\s*;:/, reason: "fork bomb" },
 ];
 
-const CONFIRM_PATTERNS = [
-  { pattern: /\brm\s+-[rf]/, reason: "Recursive/forced file deletion" },
-  { pattern: /\bgit\s+reset\s+--hard/, reason: "Hard git reset (destructive)" },
-  { pattern: /\bgit\s+push\s+.*--force/, reason: "Force push (destructive)" },
-  { pattern: /\bgit\s+clean\s+-[fd]/, reason: "Git clean (removes untracked files)" },
-  { pattern: /\bdrop\s+table\b/i, reason: "SQL table drop" },
-  { pattern: /\bdrop\s+database\b/i, reason: "SQL database drop" },
-  { pattern: /\bchmod\s+777\b/, reason: "Overly permissive file permissions" },
-  { pattern: /\bsudo\b/, reason: "Elevated privileges" },
+const CONFIRM_PATTERNS: { pattern: RegExp; reason: string }[] = [
+  { pattern: /\brm\s+(?:-[a-zA-Z]*[rf][a-zA-Z]*\s+)/, reason: "recursive/forced file deletion" },
+  { pattern: /\bgit\s+reset\s+--hard\b/, reason: "hard git reset (destructive)" },
+  { pattern: /\bgit\s+push\s+[^&|;]*--force\b/, reason: "force push (destructive)" },
+  { pattern: /\bgit\s+push\s+[^&|;]*-f\b/, reason: "force push (destructive)" },
+  { pattern: /\bgit\s+clean\s+-[a-zA-Z]*[fd]/, reason: "git clean removes untracked files" },
+  { pattern: /\bgit\s+branch\s+-D\b/, reason: "force-delete git branch" },
+  { pattern: /\bdrop\s+table\b/i, reason: "SQL DROP TABLE" },
+  { pattern: /\bdrop\s+database\b/i, reason: "SQL DROP DATABASE" },
+  { pattern: /\bchmod\s+(?:-[a-zA-Z]+\s+)*777\b/, reason: "world-writable permissions" },
+  { pattern: /\bsudo\b/, reason: "elevated privileges" },
 ];
 
 function checkCommand(command: string): CommandCheck {
@@ -1297,24 +1361,41 @@ function checkCommand(command: string): CommandCheck {
 
 ### Secrets Detection
 
-Prevent the LLM from writing secrets to files:
+Prevent the LLM from writing secrets to files. Two layers: high-signal
+literal patterns for known key formats, plus a generic key/value heuristic
+guarded against placeholder values so `YOUR_API_KEY_HERE` doesn't false-positive.
 
 ```typescript
-const SECRET_PATTERNS = [
-  /(?:api[_-]?key|secret|token|password)\s*[:=]\s*["']?[a-zA-Z0-9_\-]{20,}/i,
-  /sk-[a-zA-Z0-9]{20,}/, // OpenAI keys
-  /sk-ant-[a-zA-Z0-9\-]{20,}/, // Anthropic keys
-  /ghp_[a-zA-Z0-9]{36,}/, // GitHub tokens
-  /AKIA[A-Z0-9]{16}/, // AWS access keys
+const SECRET_PATTERNS: { pattern: RegExp; label: string }[] = [
+  { pattern: /\bsk-ant-[a-zA-Z0-9_-]{20,}/, label: "Anthropic API key" },
+  { pattern: /\bsk-proj-[a-zA-Z0-9_-]{20,}/, label: "OpenAI project key" },
+  { pattern: /\bsk-[a-zA-Z0-9]{20,}/, label: "OpenAI API key" },
+  { pattern: /\bghp_[a-zA-Z0-9]{36,}/, label: "GitHub personal token" },
+  { pattern: /\bgho_[a-zA-Z0-9]{36,}/, label: "GitHub OAuth token" },
+  { pattern: /\bAKIA[A-Z0-9]{16}\b/, label: "AWS access key" },
 ];
 
-function containsSecrets(content: string): boolean {
-  return SECRET_PATTERNS.some((p) => p.test(content));
+// Generic: a variable named like a secret, assignment, long opaque value.
+const GENERIC_KV =
+  /(?:api[_-]?key|secret|token|passwd|password|auth[_-]?token)\s*[:=]\s*["']?([a-zA-Z0-9_+\-/]{24,})["']?/i;
+const PLACEHOLDER_VALUES = /^(your[_-]?|xxx|placeholder|example|todo|change[_-]?me)/i;
+
+interface SecretsCheck {
+  found: boolean;
+  labels: string[]; // Each match is labeled so the tool error can explain what to fix.
+}
+
+function containsSecrets(content: string): SecretsCheck {
+  /* ... */
 }
 ```
 
-Used in the `write` and `edit` tools — if detected, return a warning as tool result
-instead of writing.
+Used in the `write` and `edit` tools — if detected, return an error ToolResult
+with the labels so the LLM knows what to fix (e.g. "reference it via an
+environment variable instead").
+
+**Tradeoff:** false positives here mean the LLM retries with a different
+approach; false negatives mean a leaked credential. Lean toward over-flagging.
 
 ### Permission Prompt Flow
 

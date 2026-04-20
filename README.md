@@ -40,17 +40,17 @@ See [docs/architecture-v2.md](./docs/architecture-v2.md) for the full technical 
 
 ## Progress
 
-| Sprint | Focus                                                       | Status             |
-| ------ | ----------------------------------------------------------- | ------------------ |
-| 1      | Foundation — provider layer, streaming, cost tracking       | **Done** (9/9)     |
-| 2      | Tools + Security — core tools, path/secret/command guards   | Not started (0/13) |
-| 3      | Agent Loop — loop, context tracking, permissions, subagents | Not started (0/9)  |
-| 4      | Persistence — session save/load                             | Not started (0/4)  |
-| 5      | Config & Skills — config loader, AGENTS.md, skill system    | Not started (0/6)  |
-| 6      | CLI — args, renderer, slash commands, bootstrap             | Not started (0/8)  |
-| 7      | Polish — OpenAI provider, error handling, UX                | Not started (0/6)  |
-| 8      | Docs & CI — GitHub Actions, README, demo                    | Not started (0/6)  |
-| 9      | TUI (future) — rich terminal UI                             | Not started (0/5)  |
+| Sprint | Focus                                                       | Status            |
+| ------ | ----------------------------------------------------------- | ----------------- |
+| 1      | Foundation — provider layer, streaming, cost tracking       | **Done** (9/9)    |
+| 2      | Tools + Security — core tools, path/secret/command guards   | **Done** (13/13)  |
+| 3      | Agent Loop — loop, context tracking, permissions, subagents | Not started (0/9) |
+| 4      | Persistence — session save/load                             | Not started (0/4) |
+| 5      | Config & Skills — config loader, AGENTS.md, skill system    | Not started (0/6) |
+| 6      | CLI — args, renderer, slash commands, bootstrap             | Not started (0/8) |
+| 7      | Polish — OpenAI provider, error handling, UX                | Not started (0/6) |
+| 8      | Docs & CI — GitHub Actions, README, demo                    | Not started (0/6) |
+| 9      | TUI (future) — rich terminal UI                             | Not started (0/5) |
 
 See [docs/ROADMAP.md](./docs/ROADMAP.md) for the detailed task checklist.
 

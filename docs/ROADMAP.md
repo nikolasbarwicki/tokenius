@@ -22,19 +22,19 @@ Trackable checklist derived from [PLAN.md](./PLAN.md). Each sprint produces a wo
 
 **Milestone:** All 6 core tools work with security enforced. Can read, write, search, and execute.
 
-- [ ] 2.1 Tool types in `src/tools/types.ts`
-- [ ] 2.2 Tool registry in `src/tools/registry.ts` — test: schema sorting determinism
-- [ ] 2.3 Truncation in `src/tools/truncation.ts` — test: head/tail, limits, mid-line safety
-- [ ] 2.4 Arg validation in `src/tools/validation.ts` — test: valid, missing required, wrong type
-- [ ] 2.5 Path validation in `src/security/path-validation.ts` — test: within cwd, outside, blocked files/dirs
-- [ ] 2.6 Secrets detection in `src/security/secrets-detection.ts` — test: API keys, tokens, false positives
-- [ ] 2.7 Command detection in `src/security/command-detection.ts` — test: safe, blocked, confirmation patterns
-- [ ] 2.8 `read` tool — test: read file, offset/limit, binary, blocked path
-- [ ] 2.9 `grep` tool — test: pattern match, include filter, rg fallback
-- [ ] 2.10 `glob` tool — test: pattern match, sorted output
-- [ ] 2.11 `bash` tool — test: execution, timeout kill, blocked command
-- [ ] 2.12 `write` tool — test: create, overwrite, mkdir -p, blocked secret
-- [ ] 2.13 `edit` tool — test: unique match, no match, multi-match, replace_all
+- [x] 2.1 Tool types in `src/tools/types.ts`
+- [x] 2.2 Tool registry in `src/tools/registry.ts` — test: schema sorting determinism
+- [x] 2.3 Truncation in `src/tools/truncation.ts` — test: head/tail, limits, mid-line safety
+- [x] 2.4 Arg validation in `src/tools/validation.ts` — test: valid, missing required, wrong type
+- [x] 2.5 Path validation in `src/security/path-validation.ts` — test: within cwd, outside, blocked files/dirs
+- [x] 2.6 Secrets detection in `src/security/secrets-detection.ts` — test: API keys, tokens, false positives
+- [x] 2.7 Command detection in `src/security/command-detection.ts` — test: safe, blocked, confirmation patterns
+- [x] 2.8 `read` tool — test: read file, offset/limit, binary, blocked path
+- [x] 2.9 `grep` tool — test: pattern match, include filter, rg fallback
+- [x] 2.10 `glob` tool — test: pattern match, sorted output
+- [x] 2.11 `bash` tool — test: execution, timeout kill, blocked command
+- [x] 2.12 `write` tool — test: create, overwrite, mkdir -p, blocked secret
+- [x] 2.13 `edit` tool — test: unique match, no match, multi-match, replace_all
 
 ## Sprint 3: Agent Loop
 

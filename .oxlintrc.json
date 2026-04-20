@@ -20,6 +20,7 @@
     // --- Import rules ---
     "import/first": "error",
     "import/no-duplicates": "error",
+    "no-duplicate-imports": "off",
     "import/no-self-import": "error",
     "import/no-cycle": "error",
     "import/no-default-export": "warn",
@@ -41,6 +42,7 @@
 
     // --- Turn off rules that conflict with Bun or are too noisy ---
     "unicorn/prefer-node-protocol": "off",
+    "import/no-nodejs-modules": "off",
     "no-magic-numbers": "off",
     "no-inline-comments": "off",
     "sort-keys": "off",
@@ -57,6 +59,7 @@
     "prefer-destructuring": "off",
     "init-declarations": "off",
     "unicorn/numeric-separators-style": "off",
+    "unicorn/number-literal-case": "off",
     "no-ternary": "off",
     "no-continue": "off",
     "unicorn/prefer-top-level-await": "off",
