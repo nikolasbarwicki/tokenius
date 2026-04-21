@@ -1702,12 +1702,14 @@ One session = one `.jsonl` file. Stored project-local.
   {session-id}.jsonl
 ```
 
-**First-run hint:** On first session creation, print once:
+**First-run hint:** `createSession` returns `isFirstInProject: true` the first time `.tokenius/sessions/` is created in a project. The CLI (Sprint 6) prints a one-time hint on that signal:
 
 ```
 Session saved to .tokenius/sessions/abc123.jsonl
 Tip: Add .tokenius/sessions/ to your .gitignore
 ```
+
+The manager itself never writes to stdout; keeping I/O in the CLI layer lets tests create sessions silently.
 
 ### Session Header (First Line)
 
@@ -1730,30 +1732,25 @@ type SessionEntry = SessionHeader | MessageEntry;
 interface SessionHeader {
   type: "session";
   id: string;
-  timestamp: string;
-  cwd: string;
-  model: string;
+  timestamp: string; // ISO-8601, session creation time
+  cwd: string; // Metadata; not used as a filter
+  model: string; // Model id at session creation
   title?: string;
 }
 
 interface MessageEntry {
   type: "message";
-  id: string;
-  timestamp: string;
   message: Message;
 }
 ```
 
-### Session Manager
+`MessageEntry` intentionally has no per-message `id` or `timestamp`. The message itself is the durable record; ordering is line order in the file. If we later need per-message metadata we'll add a sibling entry type rather than widen this one.
+
+### Session Manager — standalone functions
+
+The plan originally sketched a `SessionManager` interface. The implementation uses standalone functions: there's no state to carry, and the CLI holds the one `Session` it cares about directly.
 
 ```typescript
-interface SessionManager {
-  create(cwd: string, model: string): Session;
-  list(cwd: string): SessionSummary[]; // Filtered by cwd
-  load(id: string): Session;
-  append(sessionId: string, entry: SessionEntry): void;
-}
-
 interface Session {
   id: string;
   header: SessionHeader;
@@ -1767,50 +1764,80 @@ interface SessionSummary {
   timestamp: string;
   messageCount: number;
 }
+
+interface CreateSessionResult {
+  session: Session;
+  path: string;
+  /** True when .tokenius/sessions/ did not exist before this call. */
+  isFirstInProject: boolean;
+}
+
+function createSession(cwd: string, model: string): CreateSessionResult;
+function appendMessage(cwd: string, sessionId: string, message: Message): void;
+function setTitle(cwd: string, session: Session, title: string): void;
+function loadSession(cwd: string, id: string): Session;
+function listSessions(cwd: string): SessionSummary[];
+function sessionPath(cwd: string, id: string): string;
 ```
+
+A few shape choices worth naming:
+
+- **`createSession` returns an `isFirstInProject` flag.** The manager doesn't print anything — the CLI decides whether to show the `.gitignore` hint. Keeps the manager pure and test-friendly.
+- **`appendMessage` takes a `Message`, not a generic `SessionEntry`.** Messages are the only thing we ever append after the header; exposing a generic append is a footgun (nothing stops a caller from writing a second header).
+- **All functions take `cwd` explicitly.** No module-level "current session" state; two concurrent sessions can't cross-contaminate.
+- **`setTitle` is a new primitive** (not in the original plan) because the title arrives _after_ the first turn. It rewrites the header line atomically via write-tmp + rename, so a crash mid-write can never truncate the file.
 
 ### Session Title — Auto-generated
 
-After the first LLM response, generate a short title from the first user message:
+After the first turn completes, ask the same provider/model that ran the turn to summarize the first user message as a short title. Best-effort: any failure (network, abort, empty response, malformed stream) falls back to a truncated form of the message itself.
 
 ```typescript
+function truncateForTitle(message: string): string;
+
 async function generateSessionTitle(
   firstUserMessage: string,
   provider: Provider,
   model: string,
-): Promise<string> {
-  // Quick LLM call: "Summarize this request in 3-5 words for a session title"
-  // e.g., "Fix auth bug" or "Add pagination to API"
-}
+  signal?: AbortSignal,
+): Promise<string>;
 ```
+
+Implementation notes:
+
+- Hard 10-second timeout (`AbortSignal.timeout`) composed with the caller's signal via `AbortSignal.any` so a hung provider can't block the post-turn flow.
+- Sanitizes the model's output (strips surrounding quotes, trailing punctuation, whitespace).
+- On empty or error output, returns `truncateForTitle(firstUserMessage)` — collapses whitespace, caps to 40 chars with an ellipsis, returns `(untitled)` for all-whitespace input.
+- Reuses the session's model. A cheap-model router is a future optimization (Sprint 7+); at ~20 output tokens the cost is negligible.
 
 ### Writing Entries
 
 ```typescript
-function appendEntry(sessionPath: string, entry: SessionEntry): void {
-  const line = JSON.stringify(entry) + "\n";
-  Bun.write(sessionPath, line, { append: true });
+function appendMessage(cwd: string, sessionId: string, message: Message): void {
+  const entry: MessageEntry = { type: "message", message };
+  appendFileSync(sessionPath(cwd, sessionId), `${JSON.stringify(entry)}\n`);
 }
 ```
+
+All I/O is synchronous (`node:fs`). Files are small, the LLM call dominates, and sync keeps error handling and callsite ergonomics simple.
 
 ### Loading a Session
 
 ```typescript
-function loadSession(sessionPath: string): Session {
-  const content = Bun.file(sessionPath).text();
-  const lines = content.split("\n").filter(Boolean);
+function loadSession(cwd: string, id: string): Session {
+  const text = readFileSync(sessionPath(cwd, id), "utf8");
+  const lines = text.split("\n").filter(Boolean);
   const entries = lines.map((l) => JSON.parse(l) as SessionEntry);
 
-  const header = entries[0] as SessionHeader;
-  const messages: Message[] = [];
-
-  for (const entry of entries.slice(1)) {
-    if (entry.type === "message") {
-      messages.push(entry.message);
-    }
+  const first = entries[0];
+  if (!first || first.type !== "session") {
+    throw new Error(`Session file missing header: ${sessionPath(cwd, id)}`);
   }
 
-  return { id: header.id, header, messages };
+  const messages: Message[] = [];
+  for (const entry of entries.slice(1)) {
+    if (entry.type === "message") messages.push(entry.message);
+  }
+  return { id: first.id, header: first, messages };
 }
 ```
 
@@ -1818,26 +1845,35 @@ function loadSession(sessionPath: string): Session {
 
 ```typescript
 function listSessions(cwd: string): SessionSummary[] {
-  const sessionsDir = join(cwd, ".tokenius", "sessions");
-  if (!existsSync(sessionsDir)) return [];
+  const dir = join(cwd, ".tokenius", "sessions");
+  if (!existsSync(dir)) return [];
 
-  const files = readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl"));
-  return files
-    .map((f) => {
-      const firstLine = readFirstLine(join(sessionsDir, f));
-      const header = JSON.parse(firstLine) as SessionHeader;
-      const lineCount = countLines(join(sessionsDir, f));
-      return {
+  const summaries: SessionSummary[] = [];
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".jsonl")) continue;
+    try {
+      const text = readFileSync(join(dir, f), "utf8");
+      const lines = text.split("\n").filter(Boolean);
+      const first = lines[0];
+      if (!first) continue;
+      const header = JSON.parse(first) as SessionHeader;
+      summaries.push({
         id: header.id,
         title: header.title ?? "(untitled)",
         cwd: header.cwd,
         timestamp: header.timestamp,
-        messageCount: lineCount - 1, // Subtract header
-      };
-    })
-    .sort((a, b) => b.timestamp.localeCompare(a.timestamp)); // Most recent first
+        messageCount: lines.length - 1,
+      });
+    } catch {
+      continue; // Skip malformed files rather than failing the whole listing.
+    }
+  }
+
+  return summaries.toSorted((a, b) => b.timestamp.localeCompare(a.timestamp));
 }
 ```
+
+Listing is not filtered by `header.cwd` — files already live under `{cwd}/.tokenius/sessions/`, so the filesystem path is the scoping. A malformed file next to a good one shouldn't nuke `/sessions`; we skip and keep going.
 
 ---
 

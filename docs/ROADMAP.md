@@ -54,10 +54,10 @@ Trackable checklist derived from [PLAN.md](./PLAN.md). Each sprint produces a wo
 
 **Milestone:** Sessions persist to disk and can be loaded back.
 
-- [ ] 4.1 Session types in `src/session/types.ts`
-- [ ] 4.2 Session manager in `src/session/manager.ts` — test: create, append, load roundtrip, list, sort
-- [ ] 4.3 Session title generation in `src/session/title.ts`
-- [ ] 4.4 First-run `.gitignore` hint
+- [x] 4.1 Session types in `src/session/types.ts`
+- [x] 4.2 Session manager in `src/session/manager.ts` — test: create, append, load roundtrip, list, sort
+- [x] 4.3 Session title generation in `src/session/title.ts` — test: `truncateForTitle`, stream accumulation, sanitize, abort/error fallback
+- [x] 4.4 First-run `.gitignore` hint — detected via `isFirstInProject` from `createSession`; the hint text is inlined in the CLI in Sprint 6
 
 ## Sprint 5: Config & Skills
 
