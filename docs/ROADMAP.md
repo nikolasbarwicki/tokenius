@@ -106,12 +106,12 @@ Trackable checklist derived from [PLAN.md](./PLAN.md). Each sprint produces a wo
 - [ ] ~~8.5 Terminal demo recording (vhs or asciinema)~~ — dropped: didn't fit this sprint's scope; sessions are already inspectable as JSONL. Can be added later if a richer demo is needed.
 - [x] 8.6 `docs/DECISIONS.md` — 10 entries (9 core design decisions + dropped `/replay`), each with Status / Context / Decision / Alternatives / Rationale / Tradeoff / Consequences
 
-## Sprint 9: TUI (future)
+## Sprint 9: TUI
 
 **Milestone:** Rich terminal UI with visual feedback.
 
-- [ ] 9.1 Choose TUI framework (Ink or custom)
-- [ ] 9.2 Spinners during LLM response + tool execution
-- [ ] 9.3 Syntax highlighting for code blocks
-- [ ] 9.4 Split view (input bottom, output scrolling top)
-- [ ] 9.5 Permission confirmation dialogs as proper UI
+- [x] 9.1 Choose TUI framework (Ink or custom) — picked **Ink 7** + React 19; rendering architecture uses `<Static>` for committed blocks (never redrawn) + a separate live region for streaming deltas. Transcript modeled as a two-bucket block store (`staticBlocks` / `liveBlocks`) driven by an event reducer (`store.ts` + `store-event.ts`).
+- [x] 9.2 Spinners during LLM response + tool execution — `components/spinner.tsx` (braille frames, 80ms interval); status states `thinking` / `running: <tool>` / `idle` driven by agent events.
+- [x] 9.3 Syntax highlighting for code blocks — `lib/highlight.ts` with `cli-highlight`; post-fence only (unclosed fences pass through as plain text during streaming, then re-highlight on close). Language-aware via `supportsLanguage`, try/catch fallback for pathological input.
+- [x] 9.4 Split view (input bottom, output scrolling top) — `ink-text-input` at the bottom, transcript scrolls above via `<Static>`; `StatusBar` footer (model · session · tokens · cost · context%). Arrow-key history via a dedicated `useInput` hook that coexists with TextInput's character editing; per-shell in-memory only. Process-level SIGINT (not `useInput`) for Ctrl+C to avoid stealing focus from the modal/input.
+- [x] 9.5 Permission confirmation dialogs as proper UI — `components/permission-modal.tsx` (bordered yellow box); `[a]llow` / `[s]ession` / `[d]eny` keystrokes. Bridged to async prompter via `prompter.ts` (`PromptBroker`): broker holds a listener the App sets on mount; prompter returns a promise resolved after all responses collected. Batch progress "(n of m)" shown when multiple requests are pending. Fails closed (deny all) if the App hasn't mounted yet.
