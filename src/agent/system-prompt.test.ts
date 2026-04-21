@@ -59,4 +59,43 @@ describe("buildSystemPrompt", () => {
     expect(build).not.toBe(plan);
     expect(plan).toContain("CANNOT modify files");
   });
+
+  it("omits the skills section when skills is absent or empty", () => {
+    expect(buildSystemPrompt({ agent: AGENTS.build })).not.toContain("Available Skills");
+    expect(buildSystemPrompt({ agent: AGENTS.build, skills: [] })).not.toContain(
+      "Available Skills",
+    );
+  });
+
+  it("lists skills with /skill:name and descriptions", () => {
+    const prompt = buildSystemPrompt({
+      agent: AGENTS.build,
+      skills: [
+        {
+          name: "review",
+          description: "Review code thoroughly",
+          content: "body",
+          path: "/x",
+        },
+        { name: "plan", description: "", content: "body", path: "/y" },
+      ],
+    });
+    expect(prompt).toContain("## Available Skills");
+    expect(prompt).toContain("`/skill:review`");
+    expect(prompt).toContain("Review code thoroughly");
+    expect(prompt).toContain("`/skill:plan`");
+  });
+
+  it("places skills between AGENTS.md and security rules", () => {
+    const prompt = buildSystemPrompt({
+      agent: AGENTS.build,
+      agentsMd: "Project convention marker",
+      skills: [{ name: "review", description: "d", content: "c", path: "/p" }],
+    });
+    const projectIdx = prompt.indexOf("Project convention marker");
+    const skillsIdx = prompt.indexOf("## Available Skills");
+    const securityIdx = prompt.indexOf("## Security Rules");
+    expect(projectIdx).toBeLessThan(skillsIdx);
+    expect(skillsIdx).toBeLessThan(securityIdx);
+  });
 });

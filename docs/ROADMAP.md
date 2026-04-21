@@ -63,12 +63,12 @@ Trackable checklist derived from [PLAN.md](./PLAN.md). Each sprint produces a wo
 
 **Milestone:** Config, project rules, and skills all load and integrate with the agent.
 
-- [ ] 5.1 Config loader in `src/config/loader.ts` — test: default, valid, invalid provider, unknown model
-- [ ] 5.2 API key resolution in `src/config/api-keys.ts` — test: present, missing
-- [ ] 5.3 AGENTS.md loader in `src/config/agents-md.ts` — test: present, missing
-- [ ] 5.4 Skill parser in `src/skills/parser.ts` — test: with frontmatter, without, malformed
-- [ ] 5.5 Skill discovery in `src/skills/discovery.ts` — test: directory with skills, empty, missing
-- [ ] 5.6 Skill invocation — `/skill:name` prepends content
+- [x] 5.1 Config loader in `src/config/loader.ts` — test: default, valid, invalid provider, unknown model
+- [x] 5.2 API key resolution in `src/config/api-keys.ts` — test: present, missing
+- [x] 5.3 AGENTS.md loader in `src/config/agents-md.ts` — test: present, missing
+- [x] 5.4 Skill parser in `src/skills/parser.ts` — test: with frontmatter, without, malformed
+- [x] 5.5 Skill discovery in `src/skills/discovery.ts` — test: directory with skills, empty, missing
+- [x] 5.6 Skill invocation — `applySkill` helper + skills section in `buildSystemPrompt`; CLI `/skill:name` parsing lands in Sprint 6
 
 ## Sprint 6: CLI
 

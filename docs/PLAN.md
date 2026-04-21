@@ -1435,14 +1435,18 @@ mentions must be stable for the life of the session.
 The builder does **not** load AGENTS.md or discover skills itself — the
 caller passes them in. Two reasons: (1) keeps the builder pure and testable
 without touching the filesystem, and (2) the CLI caches these loads once per
-session, not per subagent. Skills are deferred to Sprint 5 — adding a hook
-now would force a placeholder in the prompt text and pollute the cache prefix.
+session, not per subagent.
+
+The skills section lists `name + description` only. Full skill bodies are
+injected into the **user message** at invocation time via `applySkill` —
+that keeps the cached system prompt small regardless of how many skills are
+available.
 
 ```typescript
 interface SystemPromptOptions {
   agent: AgentConfig;
   agentsMd?: string | null; // Loaded by the caller via loadAgentsMd(cwd)
-  // skills?: Skill[]  ← Sprint 5 addition
+  skills?: readonly Skill[]; // Discovered once per session via discoverSkills(cwd)
 }
 
 function buildSystemPrompt(options: SystemPromptOptions): string {
@@ -1450,6 +1454,10 @@ function buildSystemPrompt(options: SystemPromptOptions): string {
 
   if (options.agentsMd && options.agentsMd.trim().length > 0) {
     parts.push(`## Project Rules (AGENTS.md)\n\n${options.agentsMd.trim()}`);
+  }
+
+  if (options.skills && options.skills.length > 0) {
+    parts.push(renderSkills(options.skills));
   }
 
   parts.push(`## Security Rules
@@ -1893,71 +1901,102 @@ interface Skill {
 ### Discovery
 
 Skills are discovered from `.tokenius/skills/` in the project directory.
+Discovery runs **once per session** (not per turn) so the cached system
+prompt prefix stays stable. Edits to `SKILL.md` only take effect in the
+next session — same behavior as `AGENTS.md`.
+
+A malformed `SKILL.md` is **skipped with a stderr warning** rather than
+aborting session startup. One broken skill in a library of many shouldn't
+lock the user out of their work; the warning is loud enough to notice, the
+rest of the skills still load.
+
+Results are sorted by name so the prompt prefix is deterministic across
+runs (cache hygiene).
 
 ```typescript
 function discoverSkills(cwd: string): Skill[] {
+  const dir = join(cwd, ".tokenius", "skills");
+  if (!existsSync(dir)) return [];
+
   const skills: Skill[] = [];
-  const skillDir = join(cwd, ".tokenius", "skills");
-
-  if (!existsSync(skillDir)) return skills;
-
-  for (const entry of readdirSync(skillDir, { withFileTypes: true })) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
-    const skillMd = join(skillDir, entry.name, "SKILL.md");
-    if (existsSync(skillMd)) {
-      skills.push(parseSkill(skillMd));
+    const path = join(dir, entry.name, "SKILL.md");
+    if (!existsSync(path)) continue;
+    try {
+      skills.push(parseSkill(path));
+    } catch (error) {
+      console.warn(`[tokenius] Skipping skill "${entry.name}": ${(error as Error).message}`);
     }
   }
 
+  skills.sort((a, b) => a.name.localeCompare(b.name));
   return skills;
 }
 ```
 
 ### SKILL.md Parsing
 
-```typescript
-function parseSkill(path: string): Skill {
-  const content = readFileSync(path, "utf-8");
-  const { frontmatter, body } = parseFrontmatter(content);
+YAML frontmatter parsed via **gray-matter** rather than a hand-rolled
+`key: value` split. Handles quoting, nested values, and block-scalar
+multi-line strings cleanly, which matters the moment anyone writes
+`description: |` across several lines. The SKILL.md contract is small
+today (`name`, `description`) but YAML leaves room to grow without
+another parser rewrite.
 
-  return {
-    name: frontmatter.name ?? basename(dirname(path)),
-    description: frontmatter.description ?? "",
-    content: body,
-    path,
-  };
+Name validation is strict: **kebab-case, 1-64 chars**. The same regex is
+applied whether the name comes from frontmatter or the folder fallback,
+so bad folders and bad overrides fail uniformly.
+
+```typescript
+const NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const MAX_NAME_LENGTH = 64;
+
+function parseFrontmatter(source: string): {
+  frontmatter: Record<string, unknown>;
+  body: string;
+} {
+  try {
+    const result = matter(source);
+    return { frontmatter: (result.data ?? {}) as Record<string, unknown>, body: result.content };
+  } catch (error) {
+    throw new Error(`Malformed frontmatter: ${(error as Error).message}`, { cause: error });
+  }
 }
 
-function parseFrontmatter(content: string): { frontmatter: Record<string, string>; body: string } {
-  const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-  if (!match) return { frontmatter: {}, body: content };
+function parseSkill(path: string): Skill {
+  const { frontmatter, body } = parseFrontmatter(readFileSync(path, "utf8"));
 
-  const frontmatter: Record<string, string> = {};
-  for (const line of match[1].split("\n")) {
-    const [key, ...rest] = line.split(":");
-    if (key && rest.length) {
-      frontmatter[key.trim()] = rest
-        .join(":")
-        .trim()
-        .replace(/^["']|["']$/g, "");
-    }
+  const folderName = basename(dirname(path));
+  const rawName = frontmatter.name ?? folderName;
+  if (typeof rawName !== "string") {
+    throw new TypeError(`Invalid skill name in ${path}: expected string, got ${typeof rawName}`);
+  }
+  if (rawName.length === 0 || rawName.length > MAX_NAME_LENGTH || !NAME_PATTERN.test(rawName)) {
+    throw new Error(
+      `Invalid skill name "${rawName}" in ${path}: must be kebab-case and 1-${MAX_NAME_LENGTH} chars.`,
+    );
   }
 
-  return { frontmatter, body: match[2] };
+  const description = typeof frontmatter.description === "string" ? frontmatter.description : "";
+
+  return { name: rawName, description, content: body.trim(), path };
 }
 ```
 
 ### Skill Invocation
 
-User types `/skill:code-review review this file`. The skill content is prepended
-to the user message (simplest approach):
+`applySkill` is a **pure** helper — no filesystem access. The CLI (Sprint 6)
+parses `/skill:<name>` out of user input, looks the skill up in the list
+already discovered at session start, and calls `applySkill` to produce the
+final user message. This keeps discovery a once-per-session concern and
+keeps invocation synchronous at the call site.
 
 ```typescript
-function invokeSkill(skillName: string, userPrompt: string, cwd: string): string {
-  const skill = discoverSkills(cwd).find((s) => s.name === skillName);
-  if (!skill) throw new Error(`Unknown skill: ${skillName}`);
-
-  return `${skill.content}\n\n---\n\nUser request: ${userPrompt}`;
+function applySkill(skill: Skill, userPrompt: string): string {
+  const trimmed = userPrompt.trim();
+  if (trimmed.length === 0) return skill.content;
+  return `${skill.content}\n\n---\n\nUser request: ${trimmed}`;
 }
 ```
 
@@ -1999,63 +2038,83 @@ Format your review as:
 
 No API keys in config — env vars only (via `.env` or shell environment).
 
+Sprint 5 scope is **provider + model only**. The other fields below
+(`maxTurns`, `permissions`) are on the future roadmap but deliberately
+left out of the live schema until a consumer exists for them — carrying
+unused config is worse than extending the schema later.
+
 ```typescript
+// Sprint 5 (current)
 interface TokeniusConfig {
-  // LLM
   provider: ProviderId; // Default: "anthropic"
   model: string; // Default: "claude-sonnet-4-6"
-
-  // Agent
-  maxTurns?: number; // Override default per-agent maxTurns
-
-  // Security
-  permissions?: {
-    bash?: PermissionRule[]; // Glob patterns for allow/deny
-    blockedPaths?: string[]; // Additional blocked file paths
-  };
-}
-
-interface PermissionRule {
-  pattern: string; // Glob pattern (e.g., "git *")
-  action: "allow" | "deny" | "ask";
 }
 
 const DEFAULT_CONFIG: TokeniusConfig = {
   provider: "anthropic",
   model: "claude-sonnet-4-6",
 };
+
+// Future sprints will extend:
+//   maxTurns?: number;                 // Override default per-agent maxTurns
+//   permissions?: {
+//     bash?: PermissionRule[];         // Glob patterns for allow/deny
+//     blockedPaths?: string[];         // Additional blocked file paths
+//   };
 ```
 
 ### Config Loading — Fail Fast
 
+Zod validates the JSON shape in **strict** mode: unknown keys throw so
+typos like `provders` can't silently fall back to defaults. When the user
+specifies `model` but omits `provider`, the provider is **inferred** from
+the model's metadata — prevents confusing "provider mismatch" errors
+referencing a default value the user never wrote. Explicit mismatches
+(both fields set, disagreeing) still error loudly and name both of the
+user's own values.
+
 ```typescript
+const ConfigSchema = z
+  .object({
+    provider: z.enum(["anthropic", "openai"]).optional(),
+    model: z.string().optional(),
+  })
+  .strict();
+
 function loadConfig(cwd: string): TokeniusConfig {
   const configPath = join(cwd, "tokenius.json");
   if (!existsSync(configPath)) return DEFAULT_CONFIG;
 
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(configPath, "utf-8"));
+    raw = JSON.parse(readFileSync(configPath, "utf8"));
   } catch (error) {
-    throw new Error(`Invalid JSON in tokenius.json: ${(error as Error).message}`);
+    throw new Error(`Invalid JSON in tokenius.json: ${(error as Error).message}`, { cause: error });
   }
 
-  const config = { ...DEFAULT_CONFIG, ...(raw as Partial<TokeniusConfig>) };
+  const parsed = ConfigSchema.safeParse(raw);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const path = issue?.path.join(".") || "(root)";
+    throw new Error(`Invalid tokenius.json at "${path}": ${issue?.message ?? "unknown error"}`);
+  }
 
-  // Validate provider
-  if (!["anthropic", "openai"].includes(config.provider)) {
+  const model = parsed.data.model ?? DEFAULT_CONFIG.model;
+
+  let modelProvider: ProviderId;
+  try {
+    modelProvider = getModelMetadata(model).provider;
+  } catch {
+    throw new Error(`Unknown model "${model}" in tokenius.json.`);
+  }
+
+  if (parsed.data.provider && parsed.data.provider !== modelProvider) {
     throw new Error(
-      `Invalid provider "${config.provider}" in tokenius.json. Must be "anthropic" or "openai".`,
+      `Model "${model}" belongs to provider "${modelProvider}", but tokenius.json sets provider to "${parsed.data.provider}".`,
     );
   }
 
-  // Validate model
-  if (!MODELS[config.model]) {
-    const known = Object.keys(MODELS).join(", ");
-    throw new Error(`Unknown model "${config.model}" in tokenius.json. Known models: ${known}`);
-  }
-
-  return config;
+  return { provider: modelProvider, model };
 }
 ```
 
