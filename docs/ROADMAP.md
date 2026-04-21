@@ -40,15 +40,15 @@ Trackable checklist derived from [PLAN.md](./PLAN.md). Each sprint produces a wo
 
 **Milestone:** Agent loop works end-to-end. Tool calls, security, context tracking all wired together.
 
-- [ ] 3.1 Context tracker in `src/agent/context-tracker.ts` — test: `isContextExhausted`, `estimateTokens`
-- [ ] 3.2 Stream accumulator in `src/agent/stream.ts` — test: events to AssistantMessage assembly
-- [ ] 3.3 Tool execution in `src/agent/execute.ts` — test: validation errors, permission denied, sequential
-- [ ] 3.4 Permission prompts in `src/security/permissions.ts` — test: batch prompting, session memory
-- [ ] 3.5 Agent loop in `src/agent/loop.ts` — test: termination, tool exec, context limit, abort
-- [ ] 3.6 Agent configs in `src/agent/agents.ts`
-- [ ] 3.7 System prompt builder in `src/agent/system-prompt.ts` — test: with/without AGENTS.md, with/without skills
-- [ ] 3.8 `spawn_agent` tool in `src/tools/spawn-agent.ts` — test: subagent invocation, cost display
-- [ ] 3.9 End-to-end test with mock provider — full loop: user msg, tools, response, session
+- [x] 3.1 Context tracker in `src/agent/context-tracker.ts` — test: `isContextExhausted`, `estimateTokens`
+- [x] 3.2 Stream accumulator in `src/agent/stream.ts` — test: events to AssistantMessage assembly
+- [x] 3.3 Tool execution in `src/agent/execute.ts` — test: validation errors, permission denied, sequential
+- [x] 3.4 Permission prompts in `src/security/permissions.ts` — test: batch prompting, session memory
+- [x] 3.5 Agent loop in `src/agent/loop.ts` — test: termination, tool exec, context limit, abort
+- [x] 3.6 Agent configs in `src/agent/agents.ts`
+- [x] 3.7 System prompt builder in `src/agent/system-prompt.ts` — test: with/without AGENTS.md, with/without skills
+- [x] 3.8 `spawn_agent` tool in `src/tools/spawn-agent.ts` — test: subagent invocation, cost display
+- [x] 3.9 End-to-end test with mock provider — full loop: user msg, tools, response, session
 
 ## Sprint 4: Persistence
 

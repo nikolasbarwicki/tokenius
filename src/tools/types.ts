@@ -40,9 +40,15 @@ export interface ToolContext {
   cwd: string;
   signal: AbortSignal;
   /**
-   * Confirmation hook for operations that `command-detection` or other checks
-   * flag as requiring confirmation. In Sprint 2 defaults to always-allow via
-   * the tool registry; Sprint 3 replaces this with a real user prompt.
+   * Confirmation hook for operations flagged by command-detection or similar.
+   *
+   * When invoked by the agent loop, this is pre-resolved: the loop runs its
+   * own permission prompt upfront (see `resolveValidatedPermissions`) and
+   * passes an always-allow hook so tools don't double-prompt. Denials become
+   * validation errors before `execute` is called.
+   *
+   * The hook remains in the interface so tools can still be driven directly
+   * (tests, future callers) without going through the loop.
    */
   confirm?: (request: ConfirmRequest) => Promise<boolean>;
 }

@@ -26,6 +26,11 @@ export function createAnthropicProvider(config: ProviderConfig): Provider {
       // them into the message_end event so consumers see complete usage in one place.
       let inputUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 
+      // content_block_stop fires for every block type (text / thinking / tool_use),
+      // but only tool blocks need a tool_call_end event downstream. Track the
+      // active block type across the start/stop pair so the mapper can decide.
+      let activeBlockType: "text" | "thinking" | "tool_use" | null = null;
+
       for await (const event of stream) {
         if (event.type === "message_start") {
           const u = event.message.usage as unknown as Record<string, number>;
@@ -39,9 +44,23 @@ export function createAnthropicProvider(config: ProviderConfig): Provider {
           };
         }
 
-        const mapped = mapToStreamEvent(event, inputUsage);
+        if (event.type === "content_block_start") {
+          const blockType = event.content_block.type;
+          // Explicit whitelist — unknown future block types (e.g. server_tool_use)
+          // stay null so content_block_stop won't mis-emit a tool_call_end.
+          activeBlockType =
+            blockType === "tool_use" || blockType === "thinking" || blockType === "text"
+              ? blockType
+              : null;
+        }
+
+        const mapped = mapToStreamEvent(event, inputUsage, activeBlockType);
         if (mapped) {
           yield mapped;
+        }
+
+        if (event.type === "content_block_stop") {
+          activeBlockType = null;
         }
       }
     },
@@ -120,6 +139,7 @@ function convertTools(tools: ToolSchema[]): Anthropic.Tool[] {
 function mapToStreamEvent(
   event: RawMessageStreamEvent,
   inputUsage: TokenUsage,
+  activeBlockType: "text" | "thinking" | "tool_use" | null,
 ): StreamEvent | null {
   switch (event.type) {
     case "message_start":
@@ -150,10 +170,7 @@ function mapToStreamEvent(
       }
 
     case "content_block_stop":
-      // We only emit tool_call_end — but we don't know the block type from content_block_stop.
-      // The stream accumulator (Sprint 3) will track which block is active and handle this.
-      // For now, we always emit it and let the consumer decide.
-      return { type: "tool_call_end" };
+      return activeBlockType === "tool_use" ? { type: "tool_call_end" } : null;
 
     case "message_delta": {
       const usage: TokenUsage = {
@@ -165,11 +182,30 @@ function mapToStreamEvent(
       return {
         type: "message_end",
         usage,
-        stopReason: event.delta.stop_reason ?? "stop",
+        // Anthropic ships end_turn / tool_use / max_tokens / stop_sequence /
+        // refusal. Collapse to our canonical four here so downstream layers
+        // can rely on a closed set.
+        stopReason: normalizeStopReason(event.delta.stop_reason),
       };
     }
 
     case "message_stop":
       return null;
+  }
+}
+
+function normalizeStopReason(
+  raw: string | null | undefined,
+): "stop" | "tool_use" | "length" | "error" {
+  switch (raw) {
+    case "tool_use":
+      return "tool_use";
+    case "max_tokens":
+      return "length";
+    case "refusal":
+      return "error";
+    // end_turn, stop_sequence, null, unknown → "stop"
+    default:
+      return "stop";
   }
 }

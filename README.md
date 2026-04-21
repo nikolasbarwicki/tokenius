@@ -44,7 +44,7 @@ See [docs/architecture-v2.md](./docs/architecture-v2.md) for the full technical 
 | ------ | ----------------------------------------------------------- | ----------------- |
 | 1      | Foundation — provider layer, streaming, cost tracking       | **Done** (9/9)    |
 | 2      | Tools + Security — core tools, path/secret/command guards   | **Done** (13/13)  |
-| 3      | Agent Loop — loop, context tracking, permissions, subagents | Not started (0/9) |
+| 3      | Agent Loop — loop, context tracking, permissions, subagents | **Done** (9/9)    |
 | 4      | Persistence — session save/load                             | Not started (0/4) |
 | 5      | Config & Skills — config loader, AGENTS.md, skill system    | Not started (0/6) |
 | 6      | CLI — args, renderer, slash commands, bootstrap             | Not started (0/8) |

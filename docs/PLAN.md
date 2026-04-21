@@ -845,19 +845,40 @@ interface AgentLoopConfig {
   agent: AgentConfig; // Which agent (build, plan, explore)
   provider: Provider; // LLM provider
   model: string; // Model ID
-  messages: Message[]; // Conversation history
+  // Conversation history. NOT mutated — the loop clones it on entry and
+  // returns the clone on the result so callers keep their own reference.
+  messages: readonly Message[];
   systemPrompt: string; // Assembled once at session start (static for caching)
-  tools: ToolDefinition[]; // Available tools for this agent
-  maxTurns: number; // Safety limit
-  signal?: AbortSignal; // Cancellation (Ctrl+C)
+  cwd: string; // Working directory passed to every tool execution
+  // Required. Callers that don't need cancellation should pass
+  // `new AbortController().signal` (never fires). Keeping it mandatory
+  // means tool execution always has a concrete signal to forward.
+  signal: AbortSignal;
   onEvent?: (event: AgentEvent) => void; // Progress callback for UI
+  // Injected for tests / future UIs; defaults to a readline-based prompter.
+  prompter?: PermissionPrompter;
+  // Session-scoped "allow for session" memory. The CLI creates one per user
+  // session and reuses it across agentLoop calls; subagents inherit the
+  // parent's store. Defaults to a fresh store per call.
+  permissionStore?: PermissionStore;
+  maxTurns?: number; // Optional override for agent.maxTurns
 }
 
+// Tools are NOT passed here — the loop reads them from the module-level
+// registry using `agent.tools` names, and enforces the allow-list in
+// validateToolCalls as defense-in-depth.
+
 interface AgentLoopResult {
-  messages: Message[]; // Updated message history
+  messages: Message[]; // Updated message history (clone of input + appended turns)
   usage: TokenUsage; // Accumulated token usage
   turns: number; // How many LLM calls were made
+  stopReason: AgentStopReason; // Why the loop exited — see below
 }
+
+// Explicit termination taxonomy. Default is "turn_limit" so falling out of
+// the while-condition without an explicit set is reported truthfully rather
+// than silently.
+type AgentStopReason = "done" | "aborted" | "context_limit" | "turn_limit" | "error";
 ```
 
 ### Agent Events (for UI)
@@ -872,6 +893,14 @@ type AgentEvent =
   | { type: "tool_result"; name: string; result: ToolResult }
   | { type: "turn_end"; usage: TokenUsage }
   | { type: "context_limit_reached" }
+  | { type: "turn_limit_reached"; maxTurns: number }
+  | {
+      type: "subagent_complete";
+      agent: string;
+      turns: number;
+      tokens: number;
+      cost: number;
+    }
   | { type: "error"; error: Error };
 ```
 
@@ -879,85 +908,130 @@ type AgentEvent =
 
 ```typescript
 async function agentLoop(config: AgentLoopConfig): Promise<AgentLoopResult> {
-  const { agent, provider, model, messages, systemPrompt, tools, maxTurns, signal, onEvent } =
-    config;
-  let totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
-  let turn = 0;
+  const { agent, provider, model, systemPrompt, cwd, signal, onEvent } = config;
+  const prompter = config.prompter ?? createReadlinePrompter();
+  const permissionStore = config.permissionStore ?? createPermissionStore();
+  const maxTurns = config.maxTurns ?? agent.maxTurns;
+  // Clone on entry — input stays untouched; caller keeps its own reference.
+  const messages: Message[] = [...config.messages];
 
   const modelMeta = getModelMetadata(model);
-  const contextTracker: ContextTracker = {
-    lastKnownInputTokens: 0,
-    contextWindow: modelMeta.contextWindow,
-  };
+  const tracker = createContextTracker(model);
+
+  let totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  let turn = 0;
+  // Default to "turn_limit" so exiting via the while-condition is reported
+  // truthfully. Every other exit path sets this explicitly.
+  let stopReason: AgentStopReason = "turn_limit";
 
   while (turn < maxTurns) {
-    // 0. Check abort
-    if (signal?.aborted) break;
+    if (signal.aborted) {
+      stopReason = "aborted";
+      break;
+    }
 
-    // 1. Check context limit
-    if (isContextExhausted(contextTracker)) {
+    if (isContextExhausted(tracker)) {
       onEvent?.({ type: "context_limit_reached" });
+      stopReason = "context_limit";
       break;
     }
 
     turn++;
     onEvent?.({ type: "turn_start", turn });
 
-    // 2. Build LLM context
-    const context: LLMContext = {
-      systemPrompt,
-      messages,
-      tools: getToolSchemas(agent.tools),
-      maxTokens: modelMeta.maxOutputTokens,
-    };
-
-    // 3. Stream LLM response (with retry)
     let assistantMessage: AssistantMessage;
     try {
-      assistantMessage = await streamResponse(provider, model, context, signal, onEvent);
+      const stream = streamWithRetry(
+        provider,
+        model,
+        {
+          systemPrompt,
+          messages,
+          tools: getToolSchemas(agent.tools), // read from module-level registry
+          maxTokens: modelMeta.maxOutputTokens,
+        },
+        signal,
+      );
+      assistantMessage = await accumulateStream(stream, onEvent);
     } catch (error) {
-      onEvent?.({ type: "error", error: error as Error });
+      // An abort mid-stream surfaces as the SDK's abort error; normalize to
+      // our "aborted" stop reason rather than "error".
+      if (signal.aborted) {
+        stopReason = "aborted";
+      } else {
+        const err = error instanceof Error ? error : new Error(String(error));
+        onEvent?.({ type: "error", error: err });
+        stopReason = "error";
+      }
       break;
     }
 
     messages.push(assistantMessage);
-    totalUsage = addUsage(totalUsage, assistantMessage.usage);
-    updateTokenTracking(contextTracker, assistantMessage.usage);
-    onEvent?.({ type: "turn_end", usage: assistantMessage.usage });
+    const usage = assistantMessage.usage ?? { inputTokens: 0, outputTokens: 0 };
+    totalUsage = addUsage(totalUsage, usage);
+    updateTokenTracking(tracker, usage);
+    onEvent?.({ type: "turn_end", usage });
 
-    // 4. Check stop condition
     const toolCalls = extractToolCalls(assistantMessage);
-    if (toolCalls.length === 0) break; // Done — no more tool calls
+    if (toolCalls.length === 0) {
+      stopReason = "done";
+      break;
+    }
 
-    // 5. Validate all tool calls, batch permission prompts upfront
-    const validated = await validateToolCalls(toolCalls, tools, onEvent);
+    if (signal.aborted) {
+      stopReason = "aborted";
+      break;
+    }
 
-    // 6. Execute tools sequentially
-    const toolResults = await executeToolsSequential(validated, tools, signal, onEvent);
+    // Three-phase tool handling, each independently testable:
+    //   1. validate        — JSON schema + bash command-detection
+    //   2. resolve perms   — consult store, prompt the user for the rest
+    //   3. execute         — run approved tools, truncate, wrap as messages
+    const validated = validateToolCalls(toolCalls, agent.tools);
+    await resolveValidatedPermissions(validated, prompter, permissionStore);
+    const toolResults = await executeToolsSequential(validated, cwd, signal, onEvent);
     messages.push(...toolResults);
   }
 
-  return { messages, usage: totalUsage, turns: turn };
+  if (stopReason === "turn_limit") {
+    onEvent?.({ type: "turn_limit_reached", maxTurns });
+  }
+
+  return { messages, usage: totalUsage, turns: turn, stopReason };
 }
 ```
 
-### `streamResponse` — Accumulate Stream into AssistantMessage
+### `accumulateStream` — Stream Events to AssistantMessage
+
+Two invariants this function protects:
+
+1. **Text/thinking deltas extend the _most recent_ block of that kind.** If
+   the stream interleaves `text → tool_call → text`, that's two separate
+   `TextBlock`s — the `tool_call` in between breaks the run.
+2. **Tool-call arguments buffer per-id, not globally.** Multiple tool calls
+   in a single turn each keep their own raw JSON buffer, so they can't
+   cross-contaminate. Parsing happens on `tool_call_end` via
+   `parsePartialJson` (recovery-oriented — see Layer 1).
+
+The function throws on `error` events _or_ when the stream ends without a
+`message_end` (partial response). The loop's try/catch translates these into
+either `aborted` or `error` stop reasons.
 
 ```typescript
-async function streamResponse(
-  provider: Provider,
-  model: string,
-  context: LLMContext,
-  signal: AbortSignal | undefined,
-  onEvent: ((event: AgentEvent) => void) | undefined,
+async function accumulateStream(
+  events: AsyncIterable<StreamEvent>,
+  onEvent?: AgentEventHandler,
 ): Promise<AssistantMessage> {
   const content: AssistantContent[] = [];
-  let usage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
-  let stopReason: string = "stop";
-  let currentToolArgs = "";
+  // Raw partial-JSON buffer per tool_call id.
+  const toolCallBuffers = new Map<string, string>();
+  let activeToolCallId: string | null = null;
 
-  // streamWithRetry handles network errors and rate limits (3x backoff)
-  for await (const event of streamWithRetry(provider, model, context, signal)) {
+  let usage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  let stopReason: StopReason = "stop";
+  let sawMessageEnd = false;
+
+  for await (const event of events) {
     switch (event.type) {
       case "text_delta":
         appendToLastTextBlock(content, event.text);
@@ -971,24 +1045,38 @@ async function streamResponse(
 
       case "tool_call_start":
         content.push({ type: "tool_call", id: event.id, name: event.name, arguments: {} });
-        currentToolArgs = "";
+        toolCallBuffers.set(event.id, "");
+        activeToolCallId = event.id;
         onEvent?.({ type: "tool_call_start", name: event.name, id: event.id });
         break;
 
-      case "tool_call_delta":
-        currentToolArgs += event.arguments;
-        onEvent?.({ type: "tool_call_args", name: "", partialArgs: currentToolArgs });
+      case "tool_call_delta": {
+        if (activeToolCallId === null) break; // malformed stream — drop
+        const buffered = (toolCallBuffers.get(activeToolCallId) ?? "") + event.arguments;
+        toolCallBuffers.set(activeToolCallId, buffered);
+        onEvent?.({ type: "tool_call_args", name: "", partialArgs: buffered });
         break;
+      }
 
       case "tool_call_end": {
-        const lastToolCall = content.at(-1) as ToolCallBlock;
-        lastToolCall.arguments = parsePartialJson(currentToolArgs);
+        if (activeToolCallId === null) break;
+        const raw = toolCallBuffers.get(activeToolCallId) ?? "";
+        const block = content.find(
+          (b): b is ToolCallBlock => b.type === "tool_call" && b.id === activeToolCallId,
+        );
+        if (block) {
+          block.arguments = raw.trim().length === 0 ? {} : parsePartialJson(raw);
+        }
+        activeToolCallId = null;
         break;
       }
 
       case "message_end":
         usage = event.usage;
-        stopReason = event.stopReason;
+        // Coerce to our canonical 4-value set as a last-resort guard against
+        // a buggy provider smuggling an off-spec string into persisted history.
+        stopReason = coerceStopReason(event.stopReason);
+        sawMessageEnd = true;
         break;
 
       case "error":
@@ -996,96 +1084,176 @@ async function streamResponse(
     }
   }
 
+  if (!sawMessageEnd) throw new Error("Stream ended before message_end event");
+
   return { role: "assistant", content, usage, stopReason };
 }
 ```
 
 ### Sequential Tool Execution
 
-Tools are executed one at a time. Permission prompts are batched upfront
-during validation (before any execution begins).
+Three functions, three phases. Keeping them separate means each can be
+unit-tested without spinning up the whole loop.
 
 ```typescript
-async function validateToolCalls(
-  toolCalls: ToolCallBlock[],
-  tools: ToolDefinition[],
-  onEvent: ((event: AgentEvent) => void) | undefined,
-): Promise<ValidatedToolCall[]> {
-  const results: ValidatedToolCall[] = [];
-  const permissionsNeeded: PermissionRequest[] = [];
+interface ValidatedToolCall {
+  call: ToolCallBlock;
+  tool: ToolDefinition | null;
+  // Set if this call cannot be executed (unknown tool, bad args, blocked, denied).
+  error?: string;
+  // Set if this call needs user confirmation before executing.
+  pendingPermission?: PermissionRequest;
+}
+```
 
-  // Phase 1: Validate all calls, collect permission requests
+#### Phase 1: `validateToolCalls` — schema + security pre-check
+
+Pure function (no prompter, no async). Runs JSON-schema validation and, for
+bash, runs `checkCommand` to distinguish **blocked** (error) from
+**needs-confirm** (pending). When `allowedTools` is passed, tool calls outside
+the agent's allow-list are rejected as errors — defense-in-depth against a
+malformed stream or a recycled message history smuggling in an unauthorized
+tool name.
+
+```typescript
+function validateToolCalls(
+  toolCalls: readonly ToolCallBlock[],
+  allowedTools?: readonly string[],
+): ValidatedToolCall[] {
+  const results: ValidatedToolCall[] = [];
+  const allowed = allowedTools ? new Set(allowedTools) : null;
+
   for (const call of toolCalls) {
+    if (allowed && !allowed.has(call.name)) {
+      results.push({
+        call,
+        tool: null,
+        error: `Tool "${call.name}" is not available to this agent`,
+      });
+      continue;
+    }
     const tool = getTool(call.name);
     if (!tool) {
       results.push({ call, tool: null, error: `Unknown tool: ${call.name}` });
       continue;
     }
-
     const validation = validateArgs(tool.parameters, call.arguments);
     if (!validation.valid) {
-      results.push({ call, tool, error: validation.errors.join("\n") });
-      continue;
-    }
-
-    const security = checkToolPermission(call);
-    if (security.blocked) {
-      results.push({ call, tool, error: security.reason });
-      continue;
-    }
-
-    if (security.requiresConfirmation) {
-      permissionsNeeded.push({
-        tool: call.name,
-        description: describeToolCall(call),
-        reason: security.reason,
+      results.push({
+        call,
+        tool,
+        error: `Invalid arguments for ${call.name}: ${validation.errors.join("; ")}`,
       });
+      continue;
     }
-
-    results.push({ call, tool });
-  }
-
-  // Phase 2: Batch permission prompt (one prompt for all dangerous operations)
-  if (permissionsNeeded.length > 0) {
-    const responses = await promptPermissions(permissionsNeeded);
-    // Mark denied calls as errors
-    for (const [i, response] of responses.entries()) {
-      if (response === "deny") {
-        const idx = results.findIndex((r) => r.call.name === permissionsNeeded[i].tool && !r.error);
-        if (idx !== -1) results[idx].error = "User denied permission";
+    // Bash is the one tool that can be blocked outright or need confirmation.
+    // Pre-checking here (rather than only inside bash.ts) lets us batch-prompt
+    // before any execution starts.
+    if (call.name === "bash") {
+      const command = (call.arguments as { command?: unknown }).command;
+      if (typeof command === "string") {
+        const check = checkCommand(command);
+        if (!check.allowed) {
+          results.push({ call, tool, error: `bash blocked: ${check.reason}` });
+          continue;
+        }
+        if (check.requiresConfirmation) {
+          results.push({
+            call,
+            tool,
+            pendingPermission: { tool: "bash", description: command, reason: check.reason },
+          });
+          continue;
+        }
       }
     }
+    results.push({ call, tool });
   }
-
   return results;
 }
+```
 
-async function executeToolsSequential(
+#### Phase 2: `resolveValidatedPermissions` — prompt and adjudicate
+
+Async. Consults the `PermissionStore` first, asks the prompter only for
+unresolved requests, and mutates `validated` in place — approved calls lose
+their `pendingPermission`; denied calls gain an `error`. See Layer 5 for the
+prompter / store design.
+
+```typescript
+async function resolveValidatedPermissions(
   validated: ValidatedToolCall[],
-  tools: ToolDefinition[],
-  signal: AbortSignal | undefined,
-  onEvent: ((event: AgentEvent) => void) | undefined,
+  prompter: PermissionPrompter,
+  store: PermissionStore,
+): Promise<void> {
+  const pending = validated.filter((v) => v.pendingPermission !== undefined);
+  if (pending.length === 0) return;
+
+  const decisions = await resolvePermissions(
+    pending.map((v) => v.pendingPermission!),
+    prompter,
+    store,
+  );
+
+  for (const [i, decision] of decisions.entries()) {
+    const target = pending[i]!;
+    if (decision === "deny") {
+      target.error = `User denied permission: ${target.pendingPermission!.reason}`;
+    }
+    delete target.pendingPermission;
+  }
+}
+```
+
+#### Phase 3: `executeToolsSequential` — run and truncate
+
+Tools run one at a time. Errors (unknown tool, bad args, blocked, denied,
+aborted) skip execution and emit an error `ToolResultMessage`. The _one_
+invariant enforced here: the LLM never sees unbounded content — everything is
+truncated first.
+
+Tools don't re-prompt; the loop pre-resolved permissions, so `context.confirm`
+is auto-approved (`() => true`). Denials already became `v.error` upstream.
+
+```typescript
+async function executeToolsSequential(
+  validated: readonly ValidatedToolCall[],
+  cwd: string,
+  signal: AbortSignal,
+  onEvent?: AgentEventHandler,
 ): Promise<ToolResultMessage[]> {
   const results: ToolResultMessage[] = [];
 
   for (const v of validated) {
-    if (v.error) {
-      results.push({
-        role: "tool_result",
-        toolCallId: v.call.id,
-        toolName: v.call.name,
-        content: v.error,
-        isError: true,
+    // Honor aborts between tools so a long batch cancels promptly instead of
+    // running every remaining call to completion.
+    if (signal.aborted) {
+      results.push(errorResult(v, "aborted before execution"));
+      continue;
+    }
+    if (v.error || !v.tool) {
+      results.push(errorResult(v, v.error ?? `Unknown tool: ${v.call.name}`));
+      onEvent?.({
+        type: "tool_result",
+        name: v.call.name,
+        result: { content: v.error!, isError: true },
       });
       continue;
     }
 
-    onEvent?.({ type: "tool_call_start", name: v.call.name, id: v.call.id });
-
-    const result = await v.tool.execute(v.call.arguments, {
-      cwd: process.cwd(),
-      signal: signal ?? AbortSignal.timeout(120_000),
-    });
+    let result: ToolResult;
+    try {
+      result = await v.tool.execute(v.call.arguments, {
+        cwd,
+        signal,
+        confirm: () => Promise.resolve(true), // pre-resolved
+      });
+    } catch (error) {
+      // One tool throwing does NOT abort the batch: the LLM sees the error
+      // next turn and decides whether remaining tools are still useful.
+      const message = error instanceof Error ? error.message : String(error);
+      result = { content: `${v.call.name} threw: ${message}`, isError: true };
+    }
 
     const truncated =
       v.call.name === "bash" ? truncateTail(result.content) : truncateHead(result.content);
@@ -1095,11 +1263,10 @@ async function executeToolsSequential(
       toolCallId: v.call.id,
       toolName: v.call.name,
       content: truncated.content,
-      isError: result.isError,
+      ...(result.isError !== undefined && { isError: result.isError }),
     });
     onEvent?.({ type: "tool_result", name: v.call.name, result });
   }
-
   return results;
 }
 ```
@@ -1159,88 +1326,136 @@ Be concise — report findings, not process.`,
 
 **Note:** Subagents (plan, explore) do NOT get the `spawn_agent` tool — no recursive spawning.
 
-### `spawn_agent` Tool Implementation
+### `spawn_agent` Tool Implementation — Factory Pattern
+
+`spawn_agent` is the one tool that IS the agent — it runs a nested agent loop.
+That breaks the usual "tools don't know about agents" separation, so it's
+built as a **factory** that closes over the parent's provider, model, cwd,
+event handler, permission flow, and AGENTS.md. The CLI (Sprint 6) calls this
+once at startup and registers the resulting `ToolDefinition` before the main
+loop begins.
+
+Avoiding module-level `currentProvider` / `currentModel` / `onEvent` globals
+makes the tool testable with a mock provider and safe for future concurrent
+use (subagents side-by-side).
+
+**Isolation guarantees:**
+
+- Subagent starts with a fresh message history (just the user prompt).
+- Subagent gets its own `systemPrompt` built from its own `AgentConfig` —
+  build's prompt does not leak down.
+- Subagent tools are restricted via `AgentConfig.tools`; `validateToolCalls`
+  enforces the allow-list.
+- `spawn_agent` is deliberately omitted from plan/explore's tool list — no
+  recursive spawning.
+- The subagent's own `AgentEvent` stream is NOT forwarded to the parent —
+  they'd interleave confusingly. The parent only sees a single
+  `subagent_complete` summary.
+- Parent sees only the final assistant text; intermediate messages stay
+  inside the subagent call.
 
 ```typescript
-const spawnAgentTool: ToolDefinition = {
-  name: "spawn_agent",
-  description: `Spawn a subagent for a focused subtask. Available agents:
-- "plan": Planning and analysis, reads code but cannot modify. Use for architecture decisions, code review, and design.
-- "explore": Fast codebase exploration. Use when you need to find files, search patterns, or understand code structure.`,
-  parameters: {
-    type: "object",
-    properties: {
-      agent: { type: "string", enum: ["plan", "explore"] },
-      prompt: { type: "string", description: "Task description for the subagent" },
-    },
-    required: ["agent", "prompt"],
-  },
-  async execute(params, context) {
-    const agentConfig = AGENTS[params.agent];
-    if (!agentConfig) return { content: `Unknown agent: ${params.agent}`, isError: true };
+interface CreateSpawnAgentToolOptions {
+  provider: Provider;
+  model: string;
+  cwd: string;
+  onEvent?: AgentEventHandler;
+  agentsMd?: string | null;
+  prompter?: PermissionPrompter;
+  // Passing the parent's store through avoids re-prompting the user for a
+  // category they already approved for this session.
+  permissionStore?: PermissionStore;
+}
 
-    const tools = agentConfig.tools.map(getTool).filter(Boolean);
+function createSpawnAgentTool(options: CreateSpawnAgentToolOptions): ToolDefinition {
+  const subagentNames = Object.keys(AGENTS).filter((name) => name !== "build");
 
-    const result = await agentLoop({
-      agent: agentConfig,
-      provider: currentProvider, // Inherit from parent
-      model: currentModel, // Inherit from parent
-      messages: [{ role: "user", content: params.prompt }], // Fresh history
-      systemPrompt: buildSystemPrompt(agentConfig), // Includes AGENTS.md
-      tools,
-      maxTurns: agentConfig.maxTurns,
-      signal: context.signal,
-    });
-
-    // Return only the final text response (opaque to parent)
-    const lastAssistant = result.messages.findLast((m) => m.role === "assistant");
-    const text = extractText(lastAssistant);
-
-    // Show subagent cost to user (not in the tool result — just for display)
-    const cost = calculateCost(currentModel, result.usage);
-    onEvent?.({
-      type: "tool_result",
-      name: "spawn_agent",
-      result: {
-        content: `${agentConfig.name} agent: ${result.turns} turns, ${result.usage.inputTokens + result.usage.outputTokens} tokens, $${cost.toFixed(4)}`,
+  return {
+    name: "spawn_agent",
+    description: `Spawn a subagent for a focused subtask. Available agents:
+- "plan": Planning and analysis. Reads code but cannot modify. Use for architecture, design, code review.
+- "explore": Fast codebase exploration. Use to find files, search patterns, or understand structure.
+The subagent returns its final text response; its intermediate messages are not visible.`,
+    parameters: {
+      type: "object",
+      properties: {
+        agent: { type: "string", enum: subagentNames },
+        prompt: { type: "string", description: "Task description for the subagent." },
       },
-    });
+      required: ["agent", "prompt"],
+    },
+    async execute(params, context) {
+      const agentConfig = getAgent(params.agent);
+      if (!agentConfig) return { content: `Unknown subagent: ${params.agent}`, isError: true };
+      if (agentConfig.name === "build") {
+        return { content: `Cannot spawn build agent via spawn_agent`, isError: true };
+      }
 
-    return { content: text || "(subagent produced no response)" };
-  },
-};
+      const result = await agentLoop({
+        agent: agentConfig,
+        provider: options.provider,
+        model: options.model,
+        messages: [{ role: "user", content: params.prompt }],
+        systemPrompt: buildSystemPrompt({ agent: agentConfig, agentsMd: options.agentsMd }),
+        cwd: options.cwd,
+        signal: context.signal,
+        // Intentionally NOT forwarding options.onEvent — see isolation note.
+        ...(options.prompter && { prompter: options.prompter }),
+        ...(options.permissionStore && { permissionStore: options.permissionStore }),
+      });
+
+      const text = extractFinalText(result.messages);
+
+      // Parent UI gets one summary event. Cost stays in the event, NOT in
+      // the tool result — the LLM doesn't need to see dollar amounts.
+      options.onEvent?.({
+        type: "subagent_complete",
+        agent: agentConfig.name,
+        turns: result.turns,
+        tokens: result.usage.inputTokens + result.usage.outputTokens,
+        cost: calculateCost(options.model, result.usage),
+      });
+
+      // stopReason flows into the ToolResult: only "done" is a clean success.
+      // Everything else surfaces as isError with context so the parent LLM
+      // can react (retry, give up, ask for clarification) rather than
+      // treating partial output as finished.
+      return buildResult(result.stopReason, text);
+    },
+  };
+}
 ```
 
 ### System Prompt Assembly
 
 Built **once per session** and reused for every LLM call (prompt caching).
-No dynamic content (no timestamps, no turn counts).
+No dynamic content (no timestamps, no turn counts). Anything the prompt
+mentions must be stable for the life of the session.
+
+The builder does **not** load AGENTS.md or discover skills itself — the
+caller passes them in. Two reasons: (1) keeps the builder pure and testable
+without touching the filesystem, and (2) the CLI caches these loads once per
+session, not per subagent. Skills are deferred to Sprint 5 — adding a hook
+now would force a placeholder in the prompt text and pollute the cache prefix.
 
 ```typescript
-function buildSystemPrompt(agent: AgentConfig, cwd: string): string {
-  const parts: string[] = [agent.systemPrompt];
+interface SystemPromptOptions {
+  agent: AgentConfig;
+  agentsMd?: string | null; // Loaded by the caller via loadAgentsMd(cwd)
+  // skills?: Skill[]  ← Sprint 5 addition
+}
 
-  // Add AGENTS.md if present
-  const agentsMd = loadAgentsMd(cwd);
-  if (agentsMd) {
-    parts.push(`## Project Rules (AGENTS.md)\n\n${agentsMd}`);
+function buildSystemPrompt(options: SystemPromptOptions): string {
+  const parts: string[] = [options.agent.systemPrompt.trim()];
+
+  if (options.agentsMd && options.agentsMd.trim().length > 0) {
+    parts.push(`## Project Rules (AGENTS.md)\n\n${options.agentsMd.trim()}`);
   }
 
-  // Add available skills summary (only for build agent)
-  if (agent.name === "build") {
-    const skills = discoverSkills(cwd);
-    if (skills.length > 0) {
-      parts.push(
-        `## Available Skills\n\nThe user can invoke skills with /skill:<name>. Available:\n${skills.map((s) => `- /skill:${s.name} — ${s.description}`).join("\n")}`,
-      );
-    }
-  }
-
-  // Security reminders
   parts.push(`## Security Rules
-- Never read or write files outside the project directory
-- Never write secrets or API keys to files
-- Always confirm before running destructive commands (rm -rf, git reset, etc.)`);
+- Never read or write files outside the project directory.
+- Never write secrets or API keys to files — reference them via environment variables.
+- Destructive commands (rm -rf, git reset --hard, force push, etc.) will prompt for user confirmation.`);
 
   return parts.join("\n\n");
 }
@@ -1399,31 +1614,74 @@ approach; false negatives mean a leaked credential. Lean toward over-flagging.
 
 ### Permission Prompt Flow
 
-When tool calls require confirmation, prompts are batched upfront before any execution.
+Two moving parts kept separate so each can be tested and swapped independently:
+
+- **`PermissionPrompter`** — _how_ the user is asked. The default is a
+  readline prompt; Sprint 6 replaces it with proper TUI. Tests inject a fake.
+- **`PermissionStore`** — a per-session `Set<reason>` of categories the user
+  chose "allow for this session". Created by the caller (CLI → agent loop →
+  subagents inherit) so two concurrent loops don't cross-contaminate approvals.
+
+`resolvePermissions` is the one place both meet: it consults the store first,
+asks the prompter only for unresolved requests, and updates the store based
+on the prompter's answers.
 
 ```typescript
 interface PermissionRequest {
   tool: string;
-  description: string; // Human-readable description of what will happen
-  reason: string; // Why confirmation is needed
+  description: string; // Preview (for bash: the command itself)
+  reason: string; // CONFIRM reason from command-detection — also the store key
 }
 
-// Returns: "allow" | "deny" | "allow_session" (remember for this session)
-type PermissionResponse = "allow" | "deny" | "allow_session";
+type PermissionResponse = "allow" | "deny" | "allow_session"; // Raw user choice
+type PermissionDecision = "allow" | "deny"; // Post-adjudication outcome
 
-// Session-scoped memory for "allow_session" responses
-const sessionPermissions = new Map<string, boolean>();
+type PermissionPrompter = (requests: PermissionRequest[]) => Promise<PermissionResponse[]>;
 
-// Batch prompt: shows all dangerous operations at once, user approves/denies each
-async function promptPermissions(requests: PermissionRequest[]): Promise<PermissionResponse[]> {
-  // Check session-scoped memory first
-  // Then prompt user for remaining
-  // "allow_session" remembers the pattern for this session
+interface PermissionStore {
+  has(reason: string): boolean;
+  remember(reason: string): void;
+  clear(): void;
+  snapshot(): ReadonlySet<string>;
+}
+
+function createPermissionStore(): PermissionStore {
+  /* Set-backed */
 }
 ```
 
-If user denies a tool call, tools 1, 3, 4 (safe ones) still execute.
-Tool 2 (denied) gets an error result: "User denied permission." The LLM adapts.
+**Reasons excluded from session-scoped approval.** Some categories never get
+"allow for session" — `allow_session` on an excluded reason is downgraded to
+a one-time allow. Criteria for inclusion: irreversible (no `reflog` path
+back) or affects state outside the local repo. Destructive-but-contained ops
+(recursive `rm ./dist`, `git clean`) stay session-allowable so tight dev
+loops aren't repeatedly interrupted.
+
+```typescript
+const SESSION_EXCLUDED_REASONS: ReadonlySet<string> = new Set([
+  "elevated privileges", // sudo — always re-prompt
+  "force push (destructive)", // remote state
+  "hard git reset (destructive)", // no reflog for unpushed work
+  "force-delete git branch", // branch gone
+  "SQL DROP TABLE", // irreversible
+  "SQL DROP DATABASE", // irreversible
+]);
+
+async function resolvePermissions(
+  requests: readonly PermissionRequest[],
+  prompter: PermissionPrompter,
+  store: PermissionStore,
+): Promise<PermissionDecision[]> {
+  // 1. Pre-resolve from store: any reason already allowed for session → "allow".
+  // 2. Prompt for the rest. "allow_session" updates the store unless excluded.
+  // 3. Length mismatch from the prompter throws — that's a programming error,
+  //    not a user denial.
+}
+```
+
+If the user denies one tool call, the safe ones in the same batch still
+execute. The denied call gets an error result (`"User denied permission: ..."`)
+and the LLM adapts on the next turn.
 
 ---
 
