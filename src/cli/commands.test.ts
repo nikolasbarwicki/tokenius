@@ -94,7 +94,16 @@ describe("executeCommand — dispatch", () => {
     const { ctx, output } = makeCtx(tempCwd);
     await executeCommand("/help", ctx);
     const text = output();
-    for (const c of ["/help", "/quit", "/sessions", "/load", "/cost", "/clear", "/skills"]) {
+    for (const c of [
+      "/help",
+      "/quit",
+      "/sessions",
+      "/load",
+      "/cost",
+      "/usage",
+      "/clear",
+      "/skills",
+    ]) {
       expect(text).toContain(c);
     }
   });
@@ -180,6 +189,39 @@ describe("executeCommand — /cost", () => {
     expect(text).toContain("2 (1 tool calls)");
     // 1000 + 1500 = 2500 input tokens
     expect(text).toContain("2,500");
+  });
+});
+
+describe("executeCommand — /usage", () => {
+  it("includes session id, model, turns, tokens, cost, and context %", async () => {
+    const { ctx, output } = makeCtx(tempCwd);
+    ctx.session.header.title = "A test title";
+    const msg: AssistantMessage = {
+      role: "assistant",
+      content: [{ type: "text", text: "done" }],
+      usage: { inputTokens: 2000, outputTokens: 100 },
+      stopReason: "stop",
+    };
+    ctx.session.messages.push(msg as Message);
+
+    await executeCommand("/usage", ctx);
+    const text = output();
+    expect(text).toContain("Session usage");
+    expect(text).toContain(ctx.session.id);
+    expect(text).toContain("A test title");
+    expect(text).toContain(MODEL);
+    expect(text).toContain("Context:");
+    // haiku has a 200k window; 2000 / 200_000 = 1%
+    expect(text).toContain("1%");
+  });
+
+  it("renders cleanly with no assistant messages", async () => {
+    const { ctx, output } = makeCtx(tempCwd);
+    await executeCommand("/usage", ctx);
+    const text = output();
+    expect(text).toContain("Session usage");
+    expect(text).toContain("0 (0 tool calls)");
+    expect(text).toContain("0%");
   });
 });
 

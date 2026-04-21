@@ -23,6 +23,13 @@ import type { ProviderId } from "@/types.ts";
 export interface TokeniusConfig {
   provider: ProviderId;
   model: string;
+  /**
+   * Override the provider's API endpoint. Only applies to the `openai` provider
+   * — it's how you point at OpenAI-compatible services (xAI, DeepSeek, GLM,
+   * Kimi). Ignored for Anthropic (the SDK doesn't expose it and we don't
+   * need a use case yet).
+   */
+  baseUrl?: string;
 }
 
 export const DEFAULT_CONFIG: TokeniusConfig = {
@@ -34,6 +41,7 @@ const ConfigSchema = z
   .object({
     provider: z.enum(["anthropic", "openai"]).optional(),
     model: z.string().optional(),
+    baseUrl: z.string().url().optional(),
   })
   .strict();
 
@@ -75,5 +83,9 @@ export function loadConfig(cwd: string): TokeniusConfig {
     );
   }
 
-  return { provider: modelProvider, model };
+  return {
+    provider: modelProvider,
+    model,
+    ...(parsed.data.baseUrl && { baseUrl: parsed.data.baseUrl }),
+  };
 }

@@ -14,6 +14,7 @@
 // `messages` is cloned on entry and returned by reference in the result. The
 // input array is never mutated — callers can keep their own reference.
 
+import { debug } from "@/debug.ts";
 import { addUsage } from "@/providers/cost.ts";
 import { getModelMetadata } from "@/providers/models.ts";
 import { streamWithRetry } from "@/providers/retry.ts";
@@ -114,20 +115,18 @@ export async function agentLoop(config: AgentLoopConfig): Promise<AgentLoopResul
     turn++;
     onEvent?.({ type: "turn_start", turn });
 
-    let assistantMessage: AssistantMessage;
+    let turnResult: StreamTurnResult;
     try {
-      const stream = streamWithRetry(
+      turnResult = await streamTurnWithEmptyRetry({
         provider,
         model,
-        {
-          systemPrompt,
-          messages,
-          tools: getToolSchemas(agent.tools),
-          maxTokens: modelMeta.maxOutputTokens,
-        },
+        systemPrompt,
+        messages,
+        agent,
+        maxOutputTokens: modelMeta.maxOutputTokens,
         signal,
-      );
-      assistantMessage = await accumulateStream(stream, onEvent);
+        onEvent,
+      });
     } catch (error) {
       // Abort during streaming surfaces as the SDK's abort error; normalize
       // to our "aborted" stop reason rather than "error".
@@ -141,11 +140,21 @@ export async function agentLoop(config: AgentLoopConfig): Promise<AgentLoopResul
       break;
     }
 
-    messages.push(assistantMessage);
+    // Count dropped empty-retry usage toward the session total so /cost matches
+    // the provider dashboard — those tokens were billed, we just discarded the
+    // empty message.
+    for (const droppedUsage of turnResult.droppedUsage) {
+      totalUsage = addUsage(totalUsage, droppedUsage);
+      updateTokenTracking(tracker, droppedUsage);
+    }
+
+    const { assistantMessage } = turnResult;
     // accumulateStream always sets usage, but AssistantMessage's type keeps it
     // optional (messages coming from persisted sessions may not have it).
     // Collapse the fallback to one place so the three downstream uses agree.
     const usage = assistantMessage.usage ?? ZERO_USAGE;
+
+    messages.push(assistantMessage);
     totalUsage = addUsage(totalUsage, usage);
     updateTokenTracking(tracker, usage);
     onEvent?.({ type: "turn_end", usage });
@@ -177,4 +186,75 @@ export async function agentLoop(config: AgentLoopConfig): Promise<AgentLoopResul
 
 function extractToolCalls(message: AssistantMessage): ToolCallBlock[] {
   return message.content.filter((block): block is ToolCallBlock => block.type === "tool_call");
+}
+
+interface StreamTurnConfig {
+  provider: Provider;
+  model: string;
+  systemPrompt: string;
+  messages: Message[];
+  agent: AgentConfig;
+  maxOutputTokens: number;
+  signal: AbortSignal;
+  onEvent: AgentEventHandler | undefined;
+}
+
+interface StreamTurnResult {
+  assistantMessage: AssistantMessage;
+  /**
+   * Usage from turns we discarded as empty retries. The caller should fold
+   * these into the session total so billing matches the provider dashboard.
+   * Empty on the common (no-retry) path.
+   */
+  droppedUsage: TokenUsage[];
+}
+
+/**
+ * Run a single assistant turn, retrying once if the model returns an empty,
+ * stop-terminated response (usually flaky decoding, rarely a refusal). Retry
+ * is capped at one extra attempt — if both come back empty we return the
+ * second one so the caller can surface it honestly.
+ */
+async function streamTurnWithEmptyRetry(config: StreamTurnConfig): Promise<StreamTurnResult> {
+  const MAX_ATTEMPTS = 2;
+  const droppedUsage: TokenUsage[] = [];
+  let assistantMessage: AssistantMessage | null = null;
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const stream = streamWithRetry(
+      config.provider,
+      config.model,
+      {
+        systemPrompt: config.systemPrompt,
+        messages: config.messages,
+        tools: getToolSchemas(config.agent.tools),
+        maxTokens: config.maxOutputTokens,
+      },
+      config.signal,
+    );
+    assistantMessage = await accumulateStream(stream, config.onEvent);
+
+    const isEmptyStopTerminated =
+      assistantMessage.content.length === 0 && assistantMessage.stopReason === "stop";
+    if (!isEmptyStopTerminated) {
+      return { assistantMessage, droppedUsage };
+    }
+
+    // We have an empty turn. If we have attempts left, record its usage for
+    // the caller to bill and retry; otherwise fall through and return it so
+    // the caller handles honestly.
+    if (attempt < MAX_ATTEMPTS - 1) {
+      // Abort the retry if the user cancelled during the empty turn. Throw so
+      // the caller's existing abort handling normalizes to stopReason="aborted"
+      // — returning the empty message here would instead mark the turn "done".
+      config.signal.throwIfAborted();
+      const usage = assistantMessage.usage ?? ZERO_USAGE;
+      droppedUsage.push(usage);
+      debug("loop", "empty response, retrying", usage);
+    }
+  }
+
+  // Non-null by construction: the loop runs at least once.
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  return { assistantMessage: assistantMessage!, droppedUsage };
 }

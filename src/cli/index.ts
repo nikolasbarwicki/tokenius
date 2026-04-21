@@ -39,12 +39,12 @@ import { AGENTS } from "@/agent/agents.ts";
 import { agentLoop } from "@/agent/loop.ts";
 import { buildSystemPrompt } from "@/agent/system-prompt.ts";
 import { loadAgentsMd } from "@/config/agents-md.ts";
-import { resolveApiKey } from "@/config/api-keys.ts";
+import { MissingApiKeyError, resolveApiKey } from "@/config/api-keys.ts";
 import { loadConfig } from "@/config/loader.ts";
-import { debug, isDebugEnabled } from "@/debug.ts";
+import { debug } from "@/debug.ts";
 import { createAnthropicProvider } from "@/providers/anthropic.ts";
 import { calculateCost } from "@/providers/cost.ts";
-import { getModelMetadata } from "@/providers/models.ts";
+import { createOpenAIProvider } from "@/providers/openai.ts";
 import { registerProvider } from "@/providers/registry.ts";
 import { createPermissionStore } from "@/security/permissions.ts";
 import { appendMessage, createSession, setTitle } from "@/session/manager.ts";
@@ -53,6 +53,7 @@ import { discoverSkills } from "@/skills/discovery.ts";
 import { applySkill, parseSkillInvocation } from "@/skills/invoke.ts";
 
 import { executeCommand } from "./commands.ts";
+import { printBanner, printFirstRunHint, printMissingApiKey } from "./messages.ts";
 import { createRenderer } from "./renderer.ts";
 
 import type { Provider } from "@/providers/types.ts";
@@ -72,13 +73,28 @@ export async function runCLI(options: RunCLIOptions): Promise<void> {
 
   // --- Boot: config, API key, provider ---
   const config = loadConfig(cwd);
-  const apiKey = resolveApiKey(config.provider);
+  let apiKey: string;
+  try {
+    apiKey = resolveApiKey(config.provider);
+  } catch (error) {
+    if (error instanceof MissingApiKeyError) {
+      printMissingApiKey(error);
+      // Exit cleanly instead of rethrowing — the top-level handler in
+      // src/index.ts would add a generic "Error: …" wrapper that obscures
+      // the nicely formatted block we just printed.
+      process.exit(1);
+    }
+    throw error;
+  }
   const provider: Provider = (() => {
     switch (config.provider) {
       case "anthropic":
         return createAnthropicProvider({ apiKey });
       case "openai":
-        throw new Error("OpenAI provider not yet implemented (Sprint 7).");
+        return createOpenAIProvider({
+          apiKey,
+          ...(config.baseUrl !== undefined && { baseUrl: config.baseUrl }),
+        });
     }
   })();
   registerProvider(provider);
@@ -262,29 +278,4 @@ async function readLine(rl: ReadlineInterface): Promise<string | null> {
     debug("cli", "readline ended", error);
     return null;
   }
-}
-
-function printBanner(cwd: string, providerId: string, model: string, sessionId: string): void {
-  const meta = getModelMetadata(model);
-  const bar = pc.dim("─".repeat(50));
-  console.log(bar);
-  console.log(`${pc.bold("tokenius")}  ${pc.dim(`session ${sessionId}`)}`);
-  console.log(
-    `${pc.dim("provider:")} ${pc.cyan(providerId)}  ${pc.dim("model:")} ${pc.cyan(model)}  ${pc.dim(`(${meta.contextWindow.toLocaleString()} ctx)`)}`,
-  );
-  console.log(`${pc.dim("cwd:")} ${cwd}`);
-  if (isDebugEnabled()) {
-    console.log(pc.magenta("debug mode on — raw events → stderr"));
-  }
-  console.log(bar);
-  console.log(pc.dim("Type /help for commands, /quit to exit.\n"));
-}
-
-function printFirstRunHint(cwd: string): void {
-  const ignoreLine = ".tokenius/";
-  console.log(
-    pc.yellow(
-      `\n[hint] Created .tokenius/sessions/ in this project for the first time.\n       Consider adding "${ignoreLine}" to ${cwd}/.gitignore so session files aren't committed.\n`,
-    ),
-  );
 }

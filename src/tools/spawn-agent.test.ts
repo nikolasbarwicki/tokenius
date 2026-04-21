@@ -170,8 +170,12 @@ describe("createSpawnAgentTool", () => {
   });
 
   it("reports '(subagent produced no response)' when the subagent has no text", async () => {
+    // agentLoop retries once on an empty stop-terminated turn (see loop.ts),
+    // so script two empty turns — the retry must also come back empty for the
+    // subagent to actually surface as "no response".
     const provider = createMockProvider([
-      [messageStart(), messageEnd()], // empty assistant content
+      [messageStart(), messageEnd()], // first attempt: empty
+      [messageStart(), messageEnd()], // retry: also empty
     ]);
     const tool = createSpawnAgentTool({
       provider,

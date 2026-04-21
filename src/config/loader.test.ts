@@ -71,4 +71,24 @@ describe("loadConfig", () => {
     writeConfig(JSON.stringify({ provider: "anthropic", model: "claude-sonnet-4-6", foo: 1 }));
     expect(() => loadConfig(cwd)).toThrow(/Invalid tokenius.json/);
   });
+
+  it("accepts a baseUrl override", () => {
+    writeConfig(
+      JSON.stringify({
+        provider: "openai",
+        model: "gpt-5.4-mini",
+        baseUrl: "https://api.x.ai/v1",
+      }),
+    );
+    expect(loadConfig(cwd)).toEqual({
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      baseUrl: "https://api.x.ai/v1",
+    });
+  });
+
+  it("rejects a non-URL baseUrl", () => {
+    writeConfig(JSON.stringify({ model: "gpt-5.4-mini", baseUrl: "not a url" }));
+    expect(() => loadConfig(cwd)).toThrow(/Invalid tokenius.json/);
+  });
 });

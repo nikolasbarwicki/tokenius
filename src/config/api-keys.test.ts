@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
-import { resolveApiKey } from "./api-keys.ts";
+import { MissingApiKeyError, resolveApiKey } from "./api-keys.ts";
 
 const SAVED: Record<string, string | undefined> = {};
 
@@ -43,5 +43,16 @@ describe("resolveApiKey", () => {
   it("throws when key is set but empty", () => {
     process.env.ANTHROPIC_API_KEY = "";
     expect(() => resolveApiKey("anthropic")).toThrow(/ANTHROPIC_API_KEY/);
+  });
+
+  it("throws a MissingApiKeyError with provider + envVar attached", () => {
+    try {
+      resolveApiKey("openai");
+      throw new Error("resolveApiKey should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(MissingApiKeyError);
+      expect((error as MissingApiKeyError).provider).toBe("openai");
+      expect((error as MissingApiKeyError).envVar).toBe("OPENAI_API_KEY");
+    }
   });
 });

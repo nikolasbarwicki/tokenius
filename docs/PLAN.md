@@ -346,25 +346,34 @@ export function createAnthropicProvider(config: ProviderConfig): Provider {
 import OpenAI from "openai";
 
 export function createOpenAIProvider(config: ProviderConfig): Provider {
-  const client = new OpenAI({ apiKey: config.apiKey, baseURL: config.baseUrl });
+  // `exactOptionalPropertyTypes` forbids passing `undefined` where the SDK's
+  // option is typed `string | undefined`. Conditional spread keeps the key off
+  // the object entirely when no override is configured.
+  const client = new OpenAI({
+    apiKey: config.apiKey,
+    ...(config.baseUrl !== undefined && { baseURL: config.baseUrl }),
+  });
 
   return {
     id: "openai",
     async *stream(model, context, signal) {
+      const tools = convertTools(context.tools);
       const stream = await client.chat.completions.create(
         {
           model,
-          messages: convertMessages(context.messages), // Reshape content blocks → tool_calls array
-          tools: convertTools(context.tools),
-          max_tokens: context.maxTokens,
+          messages: convertMessages(context.systemPrompt, context.messages),
+          ...(tools && { tools }),
+          max_completion_tokens: context.maxTokens,
           stream: true,
+          // Required to get a final chunk carrying usage stats — otherwise
+          // chat completions only emits deltas and we'd have no token counts.
+          stream_options: { include_usage: true },
         },
         { signal },
       );
 
-      for await (const chunk of stream) {
-        yield mapToStreamEvent(chunk); // Normalize to common StreamEvent
-      }
+      yield { type: "message_start" };
+      yield* mapChunks(stream); // Normalize chunks to StreamEvent
     },
   };
 }
@@ -535,6 +544,43 @@ function isRetryable(error: unknown): boolean {
   return false;
 }
 ```
+
+#### Friendly provider errors (Sprint 7)
+
+When `streamWithRetry` gives up, it rethrows through `friendlyProviderError`,
+which rewrites the most common actionable cases. The original SDK error is
+attached as `cause` so it remains available for logging:
+
+| Status | Rewritten message                                                       |
+| ------ | ----------------------------------------------------------------------- |
+| 401    | "401 — check your API key (env var or `.env` file)"                     |
+| 403    | "403 — permission denied for this model or feature"                     |
+| 404    | "404 — model not found; check `tokenius.json`"                          |
+| 400    | Context-length errors get a `/clear` hint; others pass through with 400 |
+| 429    | Preserved with rate-limit phrasing                                      |
+
+Unknown statuses and non-HTTP errors pass through unchanged. The rewrite is
+string-only — no behavior change — so catch-by-type still works upstream.
+
+#### Empty-response retry (Sprint 7)
+
+Chat completions (and occasionally Anthropic) sometimes return an empty
+`stop`-terminated turn. `agentLoop` wraps each turn in
+`streamTurnWithEmptyRetry`, which re-streams once if the first attempt has
+zero content blocks and `stopReason === "stop"`. Three rules:
+
+1. **Usage from the dropped turn is still billed.** The helper returns a
+   `droppedUsage: TokenUsage[]` array; the caller folds each entry into the
+   session total and the context tracker. `/cost` matches the provider
+   dashboard down to the token.
+2. **Abort between attempts is honored.** Before the retry runs,
+   `config.signal.throwIfAborted()` fires — the `DOMException` bubbles out
+   to the caller's existing abort handler, so a cancelled empty turn
+   terminates with `stopReason === "aborted"` rather than silently returning
+   an empty message.
+3. **Give up after the second attempt.** If both responses are empty we
+   persist the second (still-empty) assistant message. No tool calls ⇒
+   `stopReason === "done"`. The caller can surface it honestly.
 
 ### Context Limit Check
 
@@ -791,8 +837,12 @@ feedback and can retry.
     ignore_case?: boolean, // Case-insensitive match. Default: false
     files_only?: boolean,  // Return paths only, no line content. Default: false
   },
-  // Implementation: requires ripgrep (rg). Returns a clear install hint if missing.
-  //   No manual fallback — the "degraded" code path would be slower and worse.
+  // Implementation: ripgrep (rg) when available. Falls back to a pure-Bun
+  //   walker (Sprint 7) using Bun.Glob.scan + in-process regex when rg isn't
+  //   on PATH, so the tool keeps working without a hard install dependency.
+  //   The fallback applies FALLBACK_IGNORE = { node_modules, dist } on top of
+  //   Glob's built-in dotfile skip (.git, .tokenius, .* handled by dot:false)
+  //   and caps output at FALLBACK_BYTE_BUDGET=50MB / FALLBACK_MATCH_LIMIT=500.
   // Output: `path:line:match` per hit (or just `path` with files_only)
   // Exit codes: 0 = matches, 1 = no matches (not an error), 2 = error
   // Truncation: truncateHead
@@ -2121,15 +2171,39 @@ function loadConfig(cwd: string): TokeniusConfig {
 ### API Key Resolution — Env Vars Only
 
 ```typescript
-function resolveApiKey(provider: ProviderId): string {
-  const envKey = provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
+const ENV_KEYS: Record<ProviderId, string> = {
+  anthropic: "ANTHROPIC_API_KEY",
+  openai: "OPENAI_API_KEY",
+};
+
+// Typed error so the CLI can render a friendly first-run hint (Sprint 7)
+// instead of a bare "Error: Missing X".
+export class MissingApiKeyError extends Error {
+  readonly provider: ProviderId;
+  readonly envVar: string;
+
+  constructor(provider: ProviderId, envVar: string) {
+    super(`Missing ${envVar}. Set it in your environment or .env file.`);
+    this.name = "MissingApiKeyError";
+    this.provider = provider;
+    this.envVar = envVar;
+  }
+}
+
+export function resolveApiKey(provider: ProviderId): string {
+  const envKey = ENV_KEYS[provider];
   const value = process.env[envKey]; // Bun auto-loads .env
   if (!value) {
-    throw new Error(`Missing ${envKey}. Set it in your environment or .env file.`);
+    throw new MissingApiKeyError(provider, envKey);
   }
   return value;
 }
 ```
+
+`runCLI` catches `MissingApiKeyError` by type and renders a colorized block
+with the provider's key URL and both `.env` / `export` snippets, then exits
+with code 1. This is the single most common first-run failure, so it gets
+a proper landing page rather than a stack trace.
 
 ### AGENTS.md Loading
 
@@ -2303,6 +2377,7 @@ export const COMMAND_HELP: readonly (readonly [string, string])[] = [
   ["/sessions", "List saved sessions in this project"],
   ["/load <id>", "Load a session (previous session stays on disk)"],
   ["/cost", "Show cumulative token cost for this session"],
+  ["/usage", "Show detailed session stats (tokens, cost, context %)"],
   ["/clear", "Start a fresh session (previous one stays on disk)"],
   ["/skills", "List skills discovered in .tokenius/skills/"],
 ];
@@ -2322,6 +2397,8 @@ export async function executeCommand(input: string, ctx: CommandContext): Promis
       return cmdLoad(parsed.arg, ctx);
     case "/cost":
       return cmdCost(ctx);
+    case "/usage":
+      return cmdUsage(ctx); // shared summarizeSession helper with /cost
     case "/clear":
       return cmdClear(ctx); // creates a new session; previous stays on disk
     case "/skills":
@@ -2332,9 +2409,11 @@ export async function executeCommand(input: string, ctx: CommandContext): Promis
 }
 ```
 
-**Deferred to Sprint 7:** `/model`, `/usage`, `/replay`. They aren't blockers for
-a working REPL and each has its own surface to design (model-switch semantics,
-cache token display, streaming from disk without re-executing tools).
+**Deferred to Sprint 7:** `/model`, `/usage`. They aren't blockers for a working
+REPL and each has its own surface to design (model-switch semantics, cache
+token display). `/replay` was scoped out entirely — sessions are already
+inspectable as JSONL files on disk, and a pretty-printed replay earns its
+complexity only in a polished TUI (Sprint 9 territory).
 
 **`/clear` creates a new session, doesn't zero messages in place.** Keeps the
 previous conversation on disk (reloadable via `/load`) and means future appends
@@ -2974,47 +3053,21 @@ The user must develop a habit of scoped sessions.
 | Hard-coded model metadata             | Simplicity vs. auto-discovery           |
 | Bun-only runtime                      | Speed + batteries vs. Node.js ecosystem |
 
-### `/replay` Command
+### `/replay` Command — Dropped
 
-Replay a saved session's messages in the terminal without re-executing tool calls
-or making API requests. Useful for demos and reviewing past sessions.
+Originally planned for Sprint 7 as a demo aid: stream a saved session's
+messages with a fake per-character delay, skipping tool execution and API
+calls. Cut because:
 
-```typescript
-async function replaySession(sessionId: string): Promise<void> {
-  const session = loadSession(sessionId);
+- Sessions are already inspectable on disk (`~/.tokenius/sessions/*.jsonl`) —
+  `cat` or `jq` gives you everything a replay would show, without the fake
+  streaming.
+- The pretty-printed version earns its complexity only when paired with a
+  richer TUI (syntax highlighting, collapsible tool blocks). That's Sprint 9
+  territory, not a Sprint 7 polish item.
+- No other feature depends on it.
 
-  for (const msg of session.messages) {
-    switch (msg.role) {
-      case "user":
-        console.log(chalk.blue(`\n> ${msg.content}\n`));
-        break;
-      case "assistant":
-        for (const block of msg.content) {
-          if (block.type === "text") {
-            // Simulate streaming with a small delay per character
-            for (const char of block.text) {
-              process.stdout.write(char);
-              await Bun.sleep(5); // 5ms per char — fast but visible
-            }
-          }
-          if (block.type === "tool_call") {
-            console.log(chalk.cyan(`\n> ${block.name}`));
-            console.log(chalk.dim(JSON.stringify(block.arguments, null, 2)));
-          }
-        }
-        break;
-      case "tool_result":
-        const color = msg.isError ? chalk.red : chalk.green;
-        console.log(color(`  ${msg.content.slice(0, 200)}`));
-        break;
-    }
-  }
-
-  console.log(
-    chalk.dim(`\nReplayed ${session.messages.length} messages from session ${sessionId}`),
-  );
-}
-```
+Keeping the note here so the decision is discoverable. No code ships.
 
 ---
 
@@ -3118,14 +3171,14 @@ Security is built alongside each tool, not retroactively.
 
 ### Sprint 7: Polish (days 18-20)
 
-| #   | Task                                                  | Test                     |
-| --- | ----------------------------------------------------- | ------------------------ |
-| 7.1 | OpenAI provider in `src/providers/openai.ts`          | — (tested with real API) |
-| 7.2 | `/usage` command (detailed stats)                     | — (tested manually)      |
-| 7.3 | `/replay` command                                     | — (tested manually)      |
-| 7.4 | Error handling pass — network, empty responses, abort | Edge case tests          |
-| 7.5 | Missing ripgrep graceful fallback                     | Fallback grep works      |
-| 7.6 | First-run experience — missing API key message        | — (tested manually)      |
+| #       | Task                                                                | Test                   |
+| ------- | ------------------------------------------------------------------- | ---------------------- |
+| 7.1     | OpenAI provider in `src/providers/openai.ts`                        | Stream/message mapping |
+| 7.2     | `/usage` command (detailed stats)                                   | — (tested manually)    |
+| ~~7.3~~ | ~~`/replay` command~~ — dropped (see "`/replay` Command — Dropped") | —                      |
+| 7.4     | Error handling — `friendlyProviderError` + empty-response retry     | Edge case tests        |
+| 7.5     | Missing ripgrep graceful fallback — pure-Bun walker                 | Fallback grep works    |
+| 7.6     | First-run experience — `MissingApiKeyError` + colorized hint        | — (tested manually)    |
 
 **Milestone:** Production-quality CLI with two providers and polished error handling.
 

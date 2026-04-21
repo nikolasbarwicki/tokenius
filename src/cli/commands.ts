@@ -20,6 +20,7 @@ import { join } from "node:path";
 import pc from "picocolors";
 
 import { calculateCost } from "@/providers/cost.ts";
+import { getModelMetadata } from "@/providers/models.ts";
 import { createSession, listSessions, loadSession } from "@/session/manager.ts";
 import { discoverSkills } from "@/skills/discovery.ts";
 
@@ -48,6 +49,7 @@ export const COMMAND_HELP: readonly (readonly [string, string])[] = [
   ["/sessions", "List saved sessions in this project"],
   ["/load <id>", "Load a session (previous session stays on disk)"],
   ["/cost", "Show cumulative token cost for this session"],
+  ["/usage", "Detailed session stats (tokens, cost, context window)"],
   ["/clear", "Start a fresh session (previous one stays on disk)"],
   ["/skills", "List skills discovered in .tokenius/skills/"],
 ];
@@ -99,6 +101,8 @@ export async function executeCommand(input: string, ctx: CommandContext): Promis
       return cmdLoad(parsed.arg, ctx);
     case "/cost":
       return cmdCost(ctx);
+    case "/usage":
+      return cmdUsage(ctx);
     case "/clear":
       return cmdClear(ctx);
     case "/skills":
@@ -172,7 +176,15 @@ function cmdLoad(arg: string, ctx: CommandContext): CommandResult {
   }
 }
 
-function cmdCost(ctx: CommandContext): CommandResult {
+interface SessionTotals {
+  totals: TokenUsage;
+  turns: number;
+  toolCalls: number;
+  /** Input tokens from the most recent assistant message — used for context %. */
+  lastInputTokens: number;
+}
+
+function summarizeSession(ctx: CommandContext): SessionTotals {
   const totals: TokenUsage = {
     inputTokens: 0,
     outputTokens: 0,
@@ -181,6 +193,7 @@ function cmdCost(ctx: CommandContext): CommandResult {
   };
   let turns = 0;
   let toolCalls = 0;
+  let lastInputTokens = 0;
 
   for (const msg of ctx.session.messages) {
     if (msg.role !== "assistant") {
@@ -194,17 +207,16 @@ function cmdCost(ctx: CommandContext): CommandResult {
         (totals.cacheReadTokens ?? 0) + (assistant.usage.cacheReadTokens ?? 0);
       totals.cacheWriteTokens =
         (totals.cacheWriteTokens ?? 0) + (assistant.usage.cacheWriteTokens ?? 0);
+      lastInputTokens = assistant.usage.inputTokens;
     }
     turns++;
     toolCalls += assistant.content.filter((b) => b.type === "tool_call").length;
   }
 
-  const model = ctx.session.header.model;
-  const cost = calculateCost(model, totals);
+  return { totals, turns, toolCalls, lastInputTokens };
+}
 
-  ctx.write(`${pc.bold("Session cost")}\n`);
-  ctx.write(`  Model:       ${model}\n`);
-  ctx.write(`  Turns:       ${turns} (${toolCalls} tool calls)\n`);
+function writeTokenBreakdown(ctx: CommandContext, totals: TokenUsage): void {
   ctx.write(
     `  Tokens:      in ${totals.inputTokens.toLocaleString()} · out ${totals.outputTokens.toLocaleString()}`,
   );
@@ -213,7 +225,45 @@ function cmdCost(ctx: CommandContext): CommandResult {
       ` · cache r/w ${(totals.cacheReadTokens ?? 0).toLocaleString()}/${(totals.cacheWriteTokens ?? 0).toLocaleString()}`,
     );
   }
-  ctx.write(`\n  Cost:        ${pc.green(`$${cost.toFixed(4)}`)}\n`);
+  ctx.write("\n");
+}
+
+function cmdCost(ctx: CommandContext): CommandResult {
+  const { totals, turns, toolCalls } = summarizeSession(ctx);
+  const model = ctx.session.header.model;
+  const cost = calculateCost(model, totals);
+
+  ctx.write(`${pc.bold("Session cost")}\n`);
+  ctx.write(`  Model:       ${model}\n`);
+  ctx.write(`  Turns:       ${turns} (${toolCalls} tool calls)\n`);
+  writeTokenBreakdown(ctx, totals);
+  ctx.write(`  Cost:        ${pc.green(`$${cost.toFixed(4)}`)}\n`);
+  return { type: "none" };
+}
+
+function cmdUsage(ctx: CommandContext): CommandResult {
+  const { totals, turns, toolCalls, lastInputTokens } = summarizeSession(ctx);
+  const model = ctx.session.header.model;
+  const cost = calculateCost(model, totals);
+  const contextWindow = getModelMetadata(model).contextWindow;
+  // Last assistant turn's input tokens is the best proxy for "how full is the
+  // window *now*" — summing inputs across turns would double-count the growing
+  // prefix. This matches what the streaming renderer shows after each turn.
+  const contextPct = contextWindow > 0 ? (lastInputTokens / contextWindow) * 100 : 0;
+
+  ctx.write(`${pc.bold("Session usage")}\n`);
+  ctx.write(`  Session:     ${ctx.session.id}`);
+  if (ctx.session.header.title) {
+    ctx.write(pc.dim(`  (${ctx.session.header.title})`));
+  }
+  ctx.write("\n");
+  ctx.write(`  Model:       ${model}\n`);
+  ctx.write(`  Turns:       ${turns} (${toolCalls} tool calls)\n`);
+  writeTokenBreakdown(ctx, totals);
+  ctx.write(`  Cost:        ${pc.green(`$${cost.toFixed(4)}`)}\n`);
+  ctx.write(
+    `  Context:     ${Math.round(lastInputTokens / 1000).toLocaleString()}k / ${Math.round(contextWindow / 1000).toLocaleString()}k tokens (${Math.round(contextPct)}%)\n`,
+  );
   return { type: "none" };
 }
 

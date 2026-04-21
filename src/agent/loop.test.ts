@@ -1,8 +1,8 @@
-// End-to-end agent loop tests. The loop is the integration point where the
-// stream accumulator, tool execution, permission resolution, and context
-// tracking all meet — so these tests hand-script provider events that drive
-// the loop through each terminal state (done, aborted, context_limit,
-// turn_limit, error) and a multi-turn tool-call cycle.
+/* oxlint-disable eslint/max-lines --
+ * End-to-end agent loop tests cover every terminal state (done, aborted,
+ * context_limit, turn_limit, error) plus multi-turn tool cycles and the
+ * empty-response retry. The 300-line cap is useful for source files; for a
+ * suite this exhaustive, listing each scenario explicitly beats cramming. */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
@@ -208,6 +208,80 @@ describe("agentLoop", () => {
     expect(input).toEqual(before);
     expect(result.messages).not.toBe(input);
     expect(result.messages[0]).toEqual(input[0] as Message);
+  });
+
+  it("retries once when the model returns an empty stop-terminated turn", async () => {
+    // Turn 1 arrives empty with stopReason "stop". The loop silently re-streams,
+    // Turn 2 comes back with real content. From the caller's perspective this
+    // looks like a single successful turn.
+    const provider = createMockProvider([
+      [messageStart(), messageEnd({ inputTokens: 10, outputTokens: 0 }, "end_turn")],
+      [messageStart(), textDelta("second try"), messageEnd()],
+    ]);
+
+    const result = await run({ provider });
+
+    expect(result.stopReason).toBe("done");
+    expect(result.turns).toBe(1);
+    expect(provider.callCount).toBe(2);
+    // Only the successful turn is persisted on the message list.
+    expect(result.messages).toHaveLength(2);
+    const assistant = result.messages[1] as AssistantMessage;
+    expect(assistant.content).toEqual([{ type: "text", text: "second try" }]);
+  });
+
+  it("bills usage from a dropped empty retry so /cost matches the provider dashboard", async () => {
+    // Empty turn burned 10 input tokens; second (successful) turn burned 12/5.
+    // Total should reflect both — we discard the message but not the bill.
+    const provider = createMockProvider([
+      [messageStart(), messageEnd({ inputTokens: 10, outputTokens: 0 }, "end_turn")],
+      [messageStart(), textDelta("ok"), messageEnd({ inputTokens: 12, outputTokens: 5 })],
+    ]);
+
+    const result = await run({ provider });
+
+    expect(result.usage.inputTokens).toBe(22);
+    expect(result.usage.outputTokens).toBe(5);
+  });
+
+  it("skips the empty-response retry when the signal aborts between attempts", async () => {
+    // Custom provider that aborts on the way out of the first (empty) stream.
+    // With the abort check, the retry is skipped and we report "aborted".
+    const controller = new AbortController();
+    let calls = 0;
+    const provider: Parameters<typeof agentLoop>[0]["provider"] = {
+      id: "anthropic",
+      async *stream() {
+        calls++;
+        yield { type: "message_start" };
+        yield {
+          type: "message_end",
+          usage: { inputTokens: 10, outputTokens: 0 },
+          stopReason: "end_turn",
+        };
+        controller.abort();
+      },
+    };
+    const result = await run({ provider, signal: controller.signal });
+    expect(calls).toBe(1);
+    expect(result.stopReason).toBe("aborted");
+  });
+
+  it("gives up after the second empty response", async () => {
+    // Both turns empty. We retry once, persist the second empty turn, and
+    // fall through to 'done' on zero tool calls.
+    const provider = createMockProvider([
+      [messageStart(), messageEnd({ inputTokens: 10, outputTokens: 0 }, "end_turn")],
+      [messageStart(), messageEnd({ inputTokens: 10, outputTokens: 0 }, "end_turn")],
+    ]);
+
+    const result = await run({ provider });
+
+    expect(result.stopReason).toBe("done");
+    expect(provider.callCount).toBe(2);
+    // The retry's (still-empty) turn is the one that lands on the history.
+    expect(result.messages).toHaveLength(2);
+    expect((result.messages[1] as AssistantMessage).content).toHaveLength(0);
   });
 
   it("stops with 'context_limit' after input tokens exceed window - reserve", async () => {

@@ -88,12 +88,12 @@ Trackable checklist derived from [PLAN.md](./PLAN.md). Each sprint produces a wo
 
 **Milestone:** Production-quality CLI with two providers and polished error handling.
 
-- [ ] 7.1 OpenAI provider in `src/providers/openai.ts`
-- [ ] 7.2 `/usage` command (detailed stats)
-- [ ] 7.3 `/replay` command
-- [ ] 7.4 Error handling pass — network, empty responses, abort
-- [ ] 7.5 Missing ripgrep graceful fallback
-- [ ] 7.6 First-run experience — missing API key message
+- [x] 7.1 OpenAI provider in `src/providers/openai.ts` — chat completions dialect (also covers xAI, DeepSeek, GLM, Kimi via `baseUrl` in `tokenius.json`); thinking blocks intentionally dropped on this path
+- [x] 7.2 `/usage` command (detailed stats) — superset of `/cost`: session id + title + context-window %; shared `summarizeSession` helper
+- [ ] ~~7.3 `/replay` command~~ — dropped: low value for this project; sessions are already inspectable via the JSONL files
+- [x] 7.4 Error handling pass — `friendlyProviderError` rewrites 401/403/404/400-context/429; one silent retry on empty stop-terminated turns in `agentLoop`
+- [x] 7.5 Missing ripgrep graceful fallback — pure-Bun walker (`Bun.Glob` + regex) with size/match caps; ignores `.git`, `node_modules`, `dist`, `.tokenius`
+- [x] 7.6 First-run experience — `MissingApiKeyError` caught in `runCLI`; colorized block with key URL + `.env` / `export` snippets for the configured provider
 
 ## Sprint 8: Documentation & CI
 
