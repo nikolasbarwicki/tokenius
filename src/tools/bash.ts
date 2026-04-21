@@ -1,3 +1,5 @@
+import { once } from "node:events";
+
 import { checkCommand } from "@/security/command-detection.ts";
 
 import type { ToolDefinition } from "./types.ts";
@@ -9,6 +11,11 @@ interface BashParams {
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 600_000;
+// After killing the process we wait briefly for the stream readers to see
+// EOF and surface any buffered output. 500ms is comfortably longer than the
+// kernel takes to deliver SIGKILL and close the pipes, and short enough that
+// a stuck reader doesn't hang the tool.
+const POST_KILL_GRACE_MS = 500;
 
 export const bashTool: ToolDefinition<BashParams> = {
   name: "bash",
@@ -51,62 +58,81 @@ export const bashTool: ToolDefinition<BashParams> = {
 
     const timeout = Math.min(params.timeout_ms ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS);
 
-    // Combine the external AbortSignal (Ctrl+C from agent loop) with our
-    // internal timeout into one signal for Bun.spawn.
-    const timeoutController = new AbortController();
-    const timer = setTimeout(() => timeoutController.abort("timeout"), timeout);
-    const composed = AbortSignal.any([context.signal, timeoutController.signal]);
+    // Spawn in a new process group so we can kill the shell *and* any
+    // forked descendants on abort/timeout. Without this, a grandchild
+    // (e.g. `sleep` forked by bash) can keep the pipe write-end open
+    // after we kill only the shell, which hangs the stream readers.
+    const proc = Bun.spawn(["/bin/sh", "-c", params.command], {
+      cwd: context.cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: process.env,
+      detached: true,
+    });
 
-    let stdout = "";
-    let stderr = "";
-    let exitCode: number | null = null;
+    // Kill the whole process group. The negative pid targets the group;
+    // ESRCH (no such group) means it's already dead, which is fine. Any
+    // other error is a real bug — don't swallow it behind a fallback that
+    // only kills the shell, since that's the bug we're guarding against.
+    const killGroup = () => {
+      try {
+        process.kill(-proc.pid, "SIGKILL");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+          throw error;
+        }
+      }
+    };
 
-    try {
-      const proc = Bun.spawn(["/bin/sh", "-c", params.command], {
-        cwd: context.cwd,
-        stdout: "pipe",
-        stderr: "pipe",
-        env: process.env,
-        signal: composed,
-      });
-
-      [stdout, stderr] = await Promise.all([
+    // Kick off stream reading once. Later paths await this same promise —
+    // the streams can only be consumed once (Response.text() locks them).
+    const output = (async () => {
+      const [stdout, stderr] = await Promise.all([
         new Response(proc.stdout).text(),
         new Response(proc.stderr).text(),
       ]);
       await proc.exited;
-      exitCode = proc.exitCode;
-    } catch (error) {
-      // Bun.spawn usually resolves even when aborted (the process is killed,
-      // exitCode becomes non-null). A throw here means something went wrong
-      // before spawn completed.
-      clearTimeout(timer);
-      if (context.signal.aborted) {
-        return { content: "bash aborted by user", isError: true };
+      return { stdout, stderr, exitCode: proc.exitCode };
+    })();
+
+    const waitForAbort = async (signal: AbortSignal): Promise<void> => {
+      if (signal.aborted) {
+        return;
       }
-      return {
-        content: `bash error: ${error instanceof Error ? error.message : String(error)}`,
-        isError: true,
-      };
-    }
-    clearTimeout(timer);
+      await once(signal, "abort");
+    };
+    // AbortSignal.timeout uses an unref-ed timer, so a command that
+    // finishes first doesn't leave a dangling handle on the event loop.
+    const timeoutSignal = AbortSignal.timeout(timeout);
 
-    // Check post-hoc: did we abort or time out? The spawn aborts silently on
-    // macOS (exitCode null or 143). Inspect the signals we controlled.
-    if (context.signal.aborted) {
-      return { content: "bash aborted by user", isError: true };
-    }
-    if (timeoutController.signal.aborted) {
-      return {
-        content: `[timed out after ${timeout}ms]\n${stdout}${stderr}`,
-        isError: true,
-      };
+    const raceOutcome = await Promise.race([
+      output.then((r) => ({ kind: "done" as const, ...r })),
+      waitForAbort(context.signal).then(() => ({ kind: "aborted" as const })),
+      waitForAbort(timeoutSignal).then(() => ({ kind: "timeout" as const })),
+    ]);
+
+    if (raceOutcome.kind === "done") {
+      const combined = raceOutcome.stdout + raceOutcome.stderr;
+      if (raceOutcome.exitCode !== null && raceOutcome.exitCode !== 0) {
+        return { content: `[exit ${raceOutcome.exitCode}]\n${combined}`, isError: true };
+      }
+      return { content: combined };
     }
 
-    const combined = stdout + stderr;
-    if (exitCode !== null && exitCode !== 0) {
-      return { content: `[exit ${exitCode}]\n${combined}`, isError: true };
+    killGroup();
+    // SIGKILL closes the pipes, so `output` should now resolve with whatever
+    // was buffered before the kill. Bound the wait — if something keeps the
+    // pipes open (shouldn't happen with a whole-group kill, but don't bet
+    // the harness on it), return with empty output rather than hang.
+    const graceSignal = AbortSignal.timeout(POST_KILL_GRACE_MS);
+    const partial = await Promise.race([
+      output.catch(() => ({ stdout: "", stderr: "" })),
+      waitForAbort(graceSignal).then(() => ({ stdout: "", stderr: "" })),
+    ]);
+    const out = partial.stdout + partial.stderr;
+    if (raceOutcome.kind === "timeout") {
+      return { content: `[timed out after ${timeout}ms]\n${out}`, isError: true };
     }
-    return { content: combined };
+    return { content: `bash aborted by user\n${out}`, isError: true };
   },
 };
