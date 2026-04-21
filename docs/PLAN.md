@@ -2833,17 +2833,28 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel in-flight runs for the same ref when a new push arrives —
+# otherwise a fast second push wastes minutes waiting on a stale run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
+    name: Lint, format, typecheck, knip, tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          # Pinned to match the local `bun --version` at the time Sprint 8
+          # landed. `latest` would track upstream and occasionally break CI
+          # for reasons unrelated to the PR under review.
+          bun-version: 1.3.0
 
-      - run: bun install --frozen-lockfile
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       - name: Lint
         run: bun run lint
@@ -2859,6 +2870,12 @@ jobs:
 
       - name: Tests
         run: bun test
+
+      # The bin is only useful if the bundler still produces a runnable
+      # file. Building in CI catches regressions in `src/index.ts` (shebang
+      # stripped, `import "../package.json"` not resolving, etc.).
+      - name: Build
+        run: bun run build
 ```
 
 ### Branch Protection
@@ -2870,30 +2887,62 @@ After the CI workflow is live, enable branch protection on `main`:
 
 ### Distribution — Making It Installable
 
-The `package.json` `bin` field makes the package runnable as a CLI.
+The `package.json` `bin` field makes the package runnable as a CLI. Three
+pieces have to line up — the `bin` entry, an executable bit on the bundle,
+and a shebang so the OS knows how to run it — otherwise `tokenius` fails
+silently after `bun link` or `bun add -g`.
 
 ```jsonc
 // package.json additions
 {
   "name": "tokenius",
   "version": "0.1.0",
-  "description": "A lightweight coding agent harness. Single-process TypeScript + Bun.",
-  "keywords": ["ai", "agent", "coding-assistant", "cli", "llm"],
+  "description": "A streaming-first AI coding agent built from scratch — direct SDK integration, tool-driven architecture, and zero framework bloat.",
+  "keywords": [
+    "agent",
+    "ai",
+    "anthropic",
+    "bun",
+    "claude",
+    "cli",
+    "coding-agent",
+    "coding-assistant",
+    "llm",
+    "openai",
+  ],
   "bin": {
     "tokenius": "./dist/index.js",
   },
-  "files": ["dist"],
+  "files": ["dist", "README.md", "LICENSE"],
   "type": "module",
   "license": "MIT",
+  "scripts": {
+    // `chmod +x` flips the execute bit on the bundled binary so npm/bun
+    // ship it executable. Without this, `tokenius` from a global install
+    // would be a regular file.
+    "build": "bun build src/index.ts --outdir dist --target bun && chmod +x dist/index.js",
+    // `prepublishOnly` is the last line of defense before a broken
+    // release. It runs the full check suite *and* builds fresh.
+    "prepublishOnly": "bun run check && bun run build",
+  },
 }
 ```
 
-**Build produces a single file:**
+**Note on `--minify`.** An earlier draft used `--minify` on the build command.
+It was dropped: the bundle is ~1 MB unminified, stack traces stay readable,
+and the handful of startup kilobytes saved doesn't matter for a local CLI.
 
-```typescript
-// bunfig.toml or bun build command
-// bun build src/index.ts --outdir dist --target bun --minify
-```
+**Shebang.** `src/index.ts` starts with `#!/usr/bin/env bun`. Bun preserves
+shebangs from source through `bun build`, so the bundled `dist/index.js`
+opens with the same line. Combined with the `chmod +x`, that's enough for
+the OS to treat the bin as an executable script.
+
+**Version lookup.** `src/index.ts` imports `../package.json` directly (`import
+pkg from "../package.json" with { type: "json" }`). The bundler inlines the
+version into the bundle, so `--version` works regardless of the cwd the bin
+is run from. The obvious alternative, `await Bun.file("package.json").json()`,
+resolves relative to `process.cwd()` — fine in development, broken the
+moment the bin is installed globally and run from another directory.
 
 **Install paths:**
 
@@ -2930,14 +2979,17 @@ export function parseArgs(argv: readonly string[]): CLIArgs {
 }
 
 // HELP_TEXT renders `COMMAND_HELP` from commands.ts so the two stay in sync.
-// In src/index.ts:
+// In src/index.ts (file starts with `#!/usr/bin/env bun`):
+import pkg from "../package.json" with { type: "json" };
+
 const args = parseArgs(process.argv.slice(2));
 if (args.help) {
   process.stdout.write(HELP_TEXT);
   return;
 }
 if (args.version) {
-  /* read version from package.json, log, return */
+  console.log(`tokenius v${pkg.version}`);
+  return;
 }
 if (args.debug) enableDebug();
 await runCLI({ cwd: process.cwd() });
@@ -3184,14 +3236,14 @@ Security is built alongside each tool, not retroactively.
 
 ### Sprint 8: Documentation & CI (days 21-23)
 
-| #   | Task                                                          |
-| --- | ------------------------------------------------------------- |
-| 8.1 | GitHub Actions CI workflow (`.github/workflows/ci.yml`)       |
-| 8.2 | Branch protection on `main`                                   |
-| 8.3 | `package.json` — bin, files, keywords, description            |
-| 8.4 | README.md — pitch, architecture diagram, install, quick start |
-| 8.5 | Terminal demo recording (vhs or asciinema)                    |
-| 8.6 | `docs/DECISIONS.md` — all 9 design decision entries           |
+| #       | Task                                                                                                |
+| ------- | --------------------------------------------------------------------------------------------------- |
+| 8.1     | GitHub Actions CI workflow (`.github/workflows/ci.yml`)                                             |
+| 8.2     | Branch protection on `main` — deferred to post-sprint; configured in GitHub Settings, not in code   |
+| 8.3     | `package.json` — bin, files, keywords; shebang + `chmod +x` + bundled-version import                |
+| 8.4     | README.md — pitch, architecture diagram, install, quick start                                       |
+| ~~8.5~~ | ~~Terminal demo recording (vhs or asciinema)~~ — dropped; sessions are already inspectable as JSONL |
+| 8.6     | `docs/DECISIONS.md` — 9 core design decision entries + dropped `/replay` (10 total)                 |
 
 **Milestone:** Portfolio-ready. Anyone can clone, install, use, and understand why it works the way it does.
 

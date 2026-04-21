@@ -99,12 +99,12 @@ Trackable checklist derived from [PLAN.md](./PLAN.md). Each sprint produces a wo
 
 **Milestone:** Portfolio-ready. Anyone can clone, install, use, and understand the design.
 
-- [ ] 8.1 GitHub Actions CI workflow (`.github/workflows/ci.yml`)
-- [ ] 8.2 Branch protection on `main`
-- [ ] 8.3 `package.json` — bin, files, keywords, description
-- [ ] 8.4 README.md — pitch, architecture diagram, install, quick start
-- [ ] 8.5 Terminal demo recording (vhs or asciinema)
-- [ ] 8.6 `docs/DECISIONS.md` — all design decision entries
+- [x] 8.1 GitHub Actions CI workflow — `.github/workflows/ci.yml`, pinned to Bun 1.3.0; runs lint, format:check, typecheck, knip, tests, build; `concurrency` group cancels superseded runs
+- [ ] 8.2 Branch protection on `main` — deferred; to be set up in GitHub Settings
+- [x] 8.3 `package.json` — added `bin`, `files`, `keywords`; dropped `private`; `build` script now `chmod +x`es the bundle; `prepublishOnly` runs `check` + `build`; `src/index.ts` gained `#!/usr/bin/env bun` and a bundled-in `package.json` import so `--version` works when installed globally
+- [x] 8.4 README.md — full rewrite: pitch, install, quick start, architecture diagram, design principles, agents/tools/commands tables, configuration, persistence, security overview, project layout; drops the progress table in favor of ROADMAP.md
+- [ ] ~~8.5 Terminal demo recording (vhs or asciinema)~~ — dropped: didn't fit this sprint's scope; sessions are already inspectable as JSONL. Can be added later if a richer demo is needed.
+- [x] 8.6 `docs/DECISIONS.md` — 10 entries (9 core design decisions + dropped `/replay`), each with Status / Context / Decision / Alternatives / Rationale / Tradeoff / Consequences
 
 ## Sprint 9: TUI (future)
 

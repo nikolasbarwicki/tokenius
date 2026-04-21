@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 // Entry point — thin bootstrap that turns CLI args into a running REPL.
 //
 // Everything interesting lives in `src/cli/index.ts`. The only jobs here are:
@@ -9,6 +10,8 @@
 // and a single, readable message (instead of an uncaught promise stack).
 
 import pc from "picocolors";
+
+import pkg from "../package.json" with { type: "json" };
 
 import { HELP_TEXT, parseArgs } from "./cli/args.ts";
 import { runCLI } from "./cli/index.ts";
@@ -23,7 +26,6 @@ async function main(): Promise<void> {
   }
 
   if (args.version) {
-    const pkg = (await Bun.file("package.json").json()) as { version: string };
     console.log(`tokenius v${pkg.version}`);
     return;
   }
