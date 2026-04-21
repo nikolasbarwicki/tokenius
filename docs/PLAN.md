@@ -2151,163 +2151,280 @@ function loadAgentsMd(cwd: string): string | null {
 
 ### Phase 1: Simple CLI (Readline)
 
-Start here. No dependencies beyond what Bun provides + chalk for colors.
+Start here. No dependencies beyond what Bun provides + `picocolors` (already in the tree).
 
 ```typescript
-import { createInterface } from "readline";
+import { createInterface } from "node:readline/promises";
 
-async function main() {
+async function runCLI(options: { cwd: string }) {
+  const { cwd } = options;
+
   // Fail fast on bad config
-  const config = loadConfig(process.cwd());
+  const config = loadConfig(cwd);
   const apiKey = resolveApiKey(config.provider);
   const provider = createProvider(config.provider, { apiKey });
+  registerProvider(provider);
 
-  // Build system prompt ONCE (static for prompt caching)
-  const systemPrompt = buildSystemPrompt(AGENTS.build, process.cwd());
+  // Session + first-run hint — `createSession` signals on first write
+  const { session: initial, isFirstInProject } = createSession(cwd, config.model);
+  if (isFirstInProject) printFirstRunHint(cwd);
+  let session = initial;
 
-  // Always start a new session
-  const session = sessionManager.create(process.cwd(), config.model);
+  // Build system prompt ONCE (static — keeps Anthropic prompt cache hot)
+  const skills = discoverSkills(cwd);
+  const agentsMd = loadAgentsMd(cwd);
+  const systemPrompt = buildSystemPrompt({ agent: AGENTS.build, agentsMd, skills });
+
+  // Banner + renderer + permission store (scoped to the shell process —
+  // survives /clear and /load on purpose, so "allow for session" behaves
+  // like shell history, not conversation history).
+  printBanner(cwd, config.provider, config.model, session.id);
+  const renderer = createRenderer({ model: config.model });
+  const permissionStore = createPermissionStore();
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
 
-  console.log("Tokenius — type /help for commands, /quit to exit\n");
-
-  // Abort controller for Ctrl+C handling
+  // Ctrl+C semantics:
+  //  - While agent is running: abort the in-flight loop
+  //  - While idle at prompt: first press prints a hint + redraws the glyph;
+  //    second press within 1s exits
   let abortController = new AbortController();
-
-  // First Ctrl+C aborts the loop, second kills the process
+  let agentRunning = false;
   let lastCtrlC = 0;
   process.on("SIGINT", () => {
+    if (agentRunning) {
+      abortController.abort();
+      return;
+    }
     const now = Date.now();
-    if (now - lastCtrlC < 1000) process.exit(0); // Double Ctrl+C = kill
+    if (now - lastCtrlC < 1000) process.exit(0);
     lastCtrlC = now;
-    abortController.abort();
-    abortController = new AbortController(); // Reset for next prompt
+    // Do NOT call rl.prompt() here — a rl.question() is in flight and
+    // rl.prompt() leaves readline state inconsistent. Just write the glyph.
+    process.stdout.write("\n(press Ctrl+C again within 1s to exit)\n" + PROMPT);
   });
 
   while (true) {
-    const input = await question(rl, "> ");
-    if (!input.trim()) continue;
+    const input = await readLine(rl); // catches close/EOF → null, logs via debug()
+    if (input === null) break;
+    if (input.trim().length === 0) continue;
 
-    // Handle slash commands
-    if (input.startsWith("/")) {
-      await handleCommand(input, session);
+    // Slash commands — `/skill:` is NOT a command, it's a user-message prefix
+    if (input.startsWith("/") && parseSkillInvocation(input) === null) {
+      const result = await executeCommand(input, { session, cwd, write: stdoutWrite });
+      if (result.type === "exit") break;
+      if (result.type === "replace_session") session = result.session;
       continue;
     }
 
-    // Handle skill invocation: /skill:name rest of prompt
-    let userMessage = input;
-    if (input.startsWith("/skill:")) {
-      const skillName = input.slice(7).split(" ")[0];
-      const userPrompt = input.slice(7 + skillName.length).trim();
-      userMessage = invokeSkill(skillName, userPrompt, process.cwd());
+    // Skill invocation via shared parser (handles `/skill: foo`, empty name, etc.)
+    let userContent = input;
+    const invocation = parseSkillInvocation(input);
+    if (invocation) {
+      if (invocation.name.length === 0) {
+        printUsage("/skill:<name> <request>");
+        continue;
+      }
+      const skill = skills.find((s) => s.name === invocation.name);
+      if (!skill) {
+        printUnknownSkill(invocation.name);
+        continue;
+      }
+      userContent = applySkill(skill, invocation.prompt);
     }
 
-    // Add user message
-    session.messages.push({ role: "user", content: userMessage });
+    // Agent turn — persist new messages only (prefix is the caller's array)
+    const userMsg = { role: "user" as const, content: userContent };
+    session.messages.push(userMsg);
+    appendMessage(cwd, session.id, userMsg);
 
-    // Run agent loop
-    const result = await agentLoop({
-      agent: AGENTS.build,
-      provider,
-      model: config.model,
-      messages: session.messages,
-      systemPrompt,
-      tools: resolveTools(AGENTS.build),
-      maxTurns: config.maxTurns ?? AGENTS.build.maxTurns,
-      signal: abortController.signal,
-      onEvent: (event) => renderEvent(event),
-    });
+    abortController = new AbortController();
+    agentRunning = true;
+    const beforeCount = session.messages.length;
 
-    session.messages = result.messages;
-    persistSession(session);
-    printUsage(result.usage, config.model);
+    let turnResult;
+    try {
+      turnResult = await agentLoop({
+        agent: AGENTS.build,
+        provider,
+        model: config.model,
+        messages: session.messages,
+        systemPrompt,
+        cwd,
+        signal: abortController.signal,
+        onEvent: renderer.handle,
+        permissionStore,
+      });
+    } finally {
+      agentRunning = false;
+    }
 
-    // Generate title after first exchange
-    if (!session.header.title) {
-      session.header.title = await generateSessionTitle(input, provider, config.model);
-      updateSessionHeader(session);
+    // agentLoop contract: returned array is the caller's extended — the
+    // first `beforeCount` entries are identical to what we passed in.
+    for (let i = beforeCount; i < turnResult.messages.length; i++) {
+      const m = turnResult.messages[i];
+      if (m) appendMessage(cwd, session.id, m);
+    }
+    session.messages = turnResult.messages;
+
+    const cost = calculateCost(config.model, turnResult.usage);
+    renderer.printTurnFooter(turnResult.usage, cost);
+
+    // Title on first successful exchange. `generateSessionTitle` swallows
+    // errors internally and is bounded by its own timeout — safe to await.
+    if (!session.header.title && turnResult.stopReason !== "error") {
+      const title = await generateSessionTitle(input, provider, config.model);
+      setTitle(cwd, session, title);
     }
   }
+
+  rl.close();
 }
 ```
 
 ### Slash Commands
 
+Commands live in `src/cli/commands.ts` behind a pure dispatch function. Each
+receives a `CommandContext { session, cwd, write }` and returns a tagged
+`CommandResult` — `none`, `exit`, `unknown`, or `replace_session`. The REPL
+pattern-matches on the result to decide whether to swap state or shut down.
+
 ```typescript
-const COMMANDS: Record<string, (args: string, session: Session) => Promise<void>> = {
-  "/help": async () => {
-    printHelp();
-  },
-  "/quit": async () => {
-    process.exit(0);
-  },
-  "/sessions": async () => {
-    listSessions(process.cwd());
-  },
-  "/load": async (id) => {
-    /* load session by id, replace current */
-  },
-  "/cost": async (_, session) => {
-    printSessionCost(session);
-  },
-  "/clear": async (_, session) => {
-    session.messages = [];
-  },
-  "/model": async (model) => {
-    /* validate and switch model */
-  },
-  "/skills": async () => {
-    listAvailableSkills(process.cwd());
-  },
-  "/usage": async (_, session) => {
-    printDetailedUsage(session);
-  },
-  "/replay": async (id) => {
-    /* replay a saved session's messages without re-executing */
-  },
-};
+export type CommandResult =
+  | { type: "none" }
+  | { type: "exit" }
+  | { type: "unknown"; name: string }
+  | { type: "replace_session"; session: Session };
+
+// Source of truth — both `/help` output and `HELP_TEXT` in args.ts render from this.
+export const COMMAND_HELP: readonly (readonly [string, string])[] = [
+  ["/help", "Show this help"],
+  ["/quit", "Exit tokenius"], // `/exit` accepted as an alias but not listed
+  ["/sessions", "List saved sessions in this project"],
+  ["/load <id>", "Load a session (previous session stays on disk)"],
+  ["/cost", "Show cumulative token cost for this session"],
+  ["/clear", "Start a fresh session (previous one stays on disk)"],
+  ["/skills", "List skills discovered in .tokenius/skills/"],
+];
+
+export async function executeCommand(input: string, ctx: CommandContext): Promise<CommandResult> {
+  const parsed = parseCommand(input);
+  if (!parsed) return { type: "none" };
+  switch (parsed.name) {
+    case "/help":
+      return cmdHelp(ctx);
+    case "/quit":
+    case "/exit":
+      return { type: "exit" };
+    case "/sessions":
+      return cmdSessions(ctx);
+    case "/load":
+      return cmdLoad(parsed.arg, ctx);
+    case "/cost":
+      return cmdCost(ctx);
+    case "/clear":
+      return cmdClear(ctx); // creates a new session; previous stays on disk
+    case "/skills":
+      return cmdSkills(ctx);
+    default:
+      /* unknown */ return { type: "unknown", name: parsed.name };
+  }
+}
 ```
+
+**Deferred to Sprint 7:** `/model`, `/usage`, `/replay`. They aren't blockers for
+a working REPL and each has its own surface to design (model-switch semantics,
+cache token display, streaming from disk without re-executing tools).
+
+**`/clear` creates a new session, doesn't zero messages in place.** Keeps the
+previous conversation on disk (reloadable via `/load`) and means future appends
+go to a clean file instead of polluting the old one. Natural "undo".
+
+**`/skill:` is deliberately not a command.** It's a user-message prefix that
+`parseCommand` explicitly rejects (returns `null`), so the REPL can route it
+through `parseSkillInvocation` + `applySkill` instead. Two concerns, two code
+paths, no overloaded handler.
 
 ### Streaming Output Rendering
 
+`createRenderer` returns a closure that holds per-turn state. The two pieces
+of state that matter:
+
+1. **Pending tool-calls queue.** `tool_call_start` pushes; `tool_result` shifts.
+   Preserves call→result order so the renderer can print `→ name  <preview>`
+   followed by the outcome atomically. Assumes tools execute in call order
+   (enforced by `executeToolsSequential` in Sprint 3).
+2. **Context window size.** Captured from `getModelMetadata` at construction,
+   used by `formatContextIndicator` on each `turn_end`.
+
+Writes go through an injected `write` callback — stdout in production, a
+buffer in tests — so the renderer is testable without poking `process.stdout`.
+
 ```typescript
-import chalk from "chalk";
+export function createRenderer(options: { model: string; write?: (s: string) => void }): Renderer {
+  const write = options.write ?? ((s) => process.stdout.write(s));
+  const contextWindow = getModelMetadata(options.model).contextWindow;
+  const pending: { name: string; rawArgs: string }[] = [];
 
-function renderEvent(event: AgentEvent): void {
-  switch (event.type) {
-    case "text_delta":
-      process.stdout.write(event.text);
-      break;
-    case "thinking_delta":
-      process.stdout.write(chalk.dim(event.thinking));
-      break;
-    case "tool_call_start":
-      console.log(chalk.cyan(`\n> ${event.name}`));
-      break;
-    case "tool_result":
-      if (event.result.isError) {
-        console.log(chalk.red(`  x Error: ${event.result.content.slice(0, 200)}`));
-      } else {
-        console.log(chalk.green(`  Done (${event.result.content.length} chars)`));
+  function handle(event: AgentEvent): void {
+    switch (event.type) {
+      case "text_delta":
+        write(event.text);
+        break;
+      case "thinking_delta":
+        write(pc.dim(event.thinking));
+        break;
+      case "tool_call_start":
+        pending.push({ name: event.name, rawArgs: "" });
+        break;
+      case "tool_call_args": {
+        const last = pending.at(-1);
+        if (last) last.rawArgs = event.partialArgs;
+        break;
       }
-      break;
-    case "turn_end":
-      // Optionally show per-turn token count
-      break;
-    case "context_limit_reached":
-      console.log(chalk.yellow("\nSession context full. Start a new session or use /clear."));
-      break;
+      case "tool_result":
+        renderToolResult(pending.shift(), event);
+        break;
+      case "turn_end":
+        write("\n" + formatContextIndicator(event.usage.inputTokens, contextWindow) + "\n");
+        break;
+      case "context_limit_reached":
+        write(pc.yellow("\nSession context full. Start a new session or use /clear.\n"));
+        break;
+      case "turn_limit_reached":
+        write(pc.yellow(`\nReached turn limit (${event.maxTurns}). Stopping.\n`));
+        break;
+      case "subagent_complete":
+        write(
+          pc.dim(
+            `\n↳ ${event.agent} done (${event.turns} turns, ${event.tokens} tokens, $${event.cost.toFixed(4)})\n`,
+          ),
+        );
+        break;
+      case "error":
+        write(pc.red(`\nError: ${event.error.message}\n`));
+        break;
+    }
   }
-}
-
-function printUsage(usage: TokenUsage, model: string): void {
-  const cost = calculateCost(model, usage);
-  console.log(
-    chalk.dim(`\n${usage.inputTokens + usage.outputTokens} tokens ($${cost.toFixed(4)})`),
-  );
+  // printTurnFooter (tokens + cost) is a separate method the main loop calls.
 }
 ```
+
+**Tool-aware `previewArgs`.** `JSON.stringify` makes every tool look the same;
+a switch keyed on tool name keeps the signal high:
+
+- `bash` → the command (first line, with `⏎` marker if multi-line)
+- `read` / `write` / `edit` → the file path
+- `grep` / `glob` → the pattern
+- `spawn_agent` → `"<agent>: <prompt preview>"`
+- Unknown tools → truncated raw JSON
+
+Partial/invalid JSON (mid-stream) produces an empty preview rather than
+throwing — we just render the tool name without args.
+
+**Context indicator** is green < 50%, yellow < 80%, red beyond. Format:
+`[5k / 200k tokens · 3%]`. Appended on every `turn_end` so the user sees
+their budget after each exchange.
 
 ### Phase 2: TUI (Later)
 
@@ -2516,14 +2633,28 @@ provider interactions and internal state to stderr so they don't interfere with
 normal stdout output.
 
 ```typescript
-const DEBUG = process.env.DEBUG === "tokenius" || process.argv.includes("--debug");
+// src/debug.ts
+let enabled = process.env["DEBUG"] === "tokenius";
 
-function debug(category: string, ...args: unknown[]): void {
-  if (!DEBUG) return;
-  const timestamp = new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
-  console.error(`[${timestamp}] [${category}]`, ...args);
+export function enableDebug(): void {
+  enabled = true;
+}
+export function isDebugEnabled(): boolean {
+  return enabled;
+}
+
+export function debug(category: string, ...args: unknown[]): void {
+  if (!enabled) return;
+  const ts = new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
+  console.error(`[${ts}] [${category}]`, ...args);
 }
 ```
+
+Module-level `let enabled` is mutable on purpose: the entry point calls
+`enableDebug()` _after_ `parseArgs` runs, so logging everywhere else stays
+a pure no-op until then. Keeping this in one tiny module with no imports
+avoids circular dependencies — every layer (providers, tools, agent, CLI)
+can depend on it freely.
 
 Usage throughout the codebase:
 
@@ -2698,33 +2829,39 @@ git clone ... && cd tokenius && bun install && bun link
 
 ### CLI Flags
 
+`parseArgs` takes the argv slice instead of reading `process.argv` directly,
+so tests don't have to monkey-patch the global. Short forms `-v` / `-h` are
+supported for the two boolean info flags; `--debug` has no short form on
+purpose (collides with test runners that use `-d`).
+
 ```typescript
 // src/cli/args.ts
-interface CLIArgs {
-  version: boolean; // --version
-  help: boolean; // --help
-  debug: boolean; // --debug
+export interface CLIArgs {
+  version: boolean;
+  help: boolean;
+  debug: boolean;
 }
 
-function parseArgs(): CLIArgs {
+export function parseArgs(argv: readonly string[]): CLIArgs {
   return {
-    version: process.argv.includes("--version"),
-    help: process.argv.includes("--help"),
-    debug: process.argv.includes("--debug"),
+    version: argv.includes("--version") || argv.includes("-v"),
+    help: argv.includes("--help") || argv.includes("-h"),
+    debug: argv.includes("--debug"),
   };
 }
 
-// In main():
-const args = parseArgs();
-if (args.version) {
-  const pkg = await Bun.file("package.json").json();
-  console.log(`tokenius v${pkg.version}`);
-  process.exit(0);
-}
+// HELP_TEXT renders `COMMAND_HELP` from commands.ts so the two stay in sync.
+// In src/index.ts:
+const args = parseArgs(process.argv.slice(2));
 if (args.help) {
-  printHelp();
-  process.exit(0);
+  process.stdout.write(HELP_TEXT);
+  return;
 }
+if (args.version) {
+  /* read version from package.json, log, return */
+}
+if (args.debug) enableDebug();
+await runCLI({ cwd: process.cwd() });
 ```
 
 ---

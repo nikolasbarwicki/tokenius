@@ -6,6 +6,8 @@
 // `parseArgs` is pure (takes an argv slice) so the tests don't have to poke
 // `process.argv`. `main()` in src/index.ts calls `parseArgs(process.argv.slice(2))`.
 
+import { COMMAND_HELP } from "./commands.ts";
+
 export interface CLIArgs {
   version: boolean;
   help: boolean;
@@ -20,6 +22,11 @@ export function parseArgs(argv: readonly string[]): CLIArgs {
   };
 }
 
+function renderInSessionCommands(): string {
+  const width = Math.max(...COMMAND_HELP.map(([name]) => name.length));
+  return COMMAND_HELP.map(([name, desc]) => `  ${name.padEnd(width)}  ${desc}`).join("\n");
+}
+
 export const HELP_TEXT = `Tokenius — a streaming-first coding agent.
 
 Usage:
@@ -32,11 +39,5 @@ Options:
                    (same effect as DEBUG=tokenius)
 
 In-session commands:
-  /help            List available slash commands
-  /sessions        List sessions in this project
-  /load <id>       Replace current session with a saved one
-  /cost            Show session cost so far
-  /clear           Clear conversation history (keeps session file)
-  /skills          List discovered skills in .tokenius/skills/
-  /quit            Exit
+${renderInSessionCommands()}
 `;

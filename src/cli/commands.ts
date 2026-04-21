@@ -39,7 +39,20 @@ export type CommandResult =
   | { type: "unknown"; name: string }
   | { type: "replace_session"; session: Session };
 
-const AVAILABLE = ["/help", "/quit", "/sessions", "/load", "/cost", "/clear", "/skills"] as const;
+// Source of truth for in-session commands. `/exit` is accepted as an alias
+// for `/quit` but intentionally not listed — a single canonical name keeps
+// help output tidy.
+export const COMMAND_HELP: readonly (readonly [string, string])[] = [
+  ["/help", "Show this help"],
+  ["/quit", "Exit tokenius"],
+  ["/sessions", "List saved sessions in this project"],
+  ["/load <id>", "Load a session (previous session stays on disk)"],
+  ["/cost", "Show cumulative token cost for this session"],
+  ["/clear", "Start a fresh session (previous one stays on disk)"],
+  ["/skills", "List skills discovered in .tokenius/skills/"],
+];
+
+const AVAILABLE = COMMAND_HELP.map(([name]) => name.split(" ")[0]);
 
 /**
  * Parse a raw input line (e.g. `/load abc123`) into a command name and the
@@ -100,17 +113,14 @@ export async function executeCommand(input: string, ctx: CommandContext): Promis
 // --- Individual commands ---
 
 function cmdHelp(ctx: CommandContext): CommandResult {
+  const width = Math.max(...COMMAND_HELP.map(([name]) => name.length));
   const lines = [
     pc.bold("Available commands:"),
-    "  /help              Show this help",
-    "  /quit, /exit       Exit tokenius",
-    "  /sessions          List saved sessions in this project",
-    "  /load <id>         Load a session (previous session stays on disk)",
-    "  /cost              Show cumulative token cost for this session",
-    "  /clear             Start a fresh session (previous one stays on disk)",
-    "  /skills            List skills discovered in .tokenius/skills/",
+    ...COMMAND_HELP.map(([name, desc]) => `  ${name.padEnd(width)}  ${desc}`),
     "",
-    pc.dim("Tip: prefix a message with /skill:<name> to inject a skill's instructions."),
+    pc.dim('Note: permission approvals ("allow for session") apply to this shell'),
+    pc.dim("      process — they persist across /clear and /load."),
+    pc.dim("Tip:  prefix a message with /skill:<name> to inject a skill's instructions."),
     "",
   ];
   ctx.write(`${lines.join("\n")}\n`);

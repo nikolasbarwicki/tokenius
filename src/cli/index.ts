@@ -19,9 +19,11 @@
 //     *this shell session*, not *this conversation*.
 //
 //   * Title generation fires after the first assistant turn completes. It's
-//     best-effort — any failure falls back to a truncated user message. We
-//     don't await a background promise because the second turn can't start
-//     until the first persists, and persistence happens synchronously.
+//     best-effort: `generateSessionTitle` swallows errors internally and
+//     falls back to a truncated user message, and it's bounded by its own
+//     timeout. We `await` it for simplicity — there's no user-visible benefit
+//     to overlapping it with the next prompt, and a synchronous call keeps
+//     session mutation ordered without needing a captured snapshot.
 //
 //   * Ctrl+C semantics:
 //       - While the agent is running: abort the current loop.
@@ -48,7 +50,7 @@ import { createPermissionStore } from "@/security/permissions.ts";
 import { appendMessage, createSession, setTitle } from "@/session/manager.ts";
 import { generateSessionTitle } from "@/session/title.ts";
 import { discoverSkills } from "@/skills/discovery.ts";
-import { applySkill } from "@/skills/invoke.ts";
+import { applySkill, parseSkillInvocation } from "@/skills/invoke.ts";
 
 import { executeCommand } from "./commands.ts";
 import { createRenderer } from "./renderer.ts";
@@ -134,10 +136,15 @@ export async function runCLI(options: RunCLIOptions): Promise<void> {
       process.exit(0);
     }
     lastCtrlC = now;
-    process.stdout.write(pc.dim("\n(press Ctrl+C again within 1s to exit, or type /quit)\n"));
-    // Re-render the prompt so the user isn't left wondering if readline
-    // is still alive.
-    rl.prompt();
+    // Print the hint + a fresh prompt glyph so the user knows readline is
+    // still waiting. We deliberately DON'T call `rl.prompt()` here: a
+    // `rl.question()` is already in flight and `rl.prompt()` can leave the
+    // internal readline state inconsistent (double prompt, dropped input).
+    // Writing the glyph is cosmetic only — any typed input still goes to
+    // the pending question.
+    process.stdout.write(
+      pc.dim("\n(press Ctrl+C again within 1s to exit, or type /quit)\n") + PROMPT,
+    );
   });
 
   // --- Main loop ---
@@ -156,7 +163,9 @@ export async function runCLI(options: RunCLIOptions): Promise<void> {
     }
 
     // --- Slash commands ---
-    if (input.startsWith("/") && !input.startsWith("/skill:")) {
+    // `/skill:` looks like a slash command but is actually a user-message
+    // prefix; route it to the skill branch below.
+    if (input.startsWith("/") && parseSkillInvocation(input) === null) {
       const result = await executeCommand(input, {
         session,
         cwd,
@@ -173,19 +182,18 @@ export async function runCLI(options: RunCLIOptions): Promise<void> {
 
     // --- Skill invocation ---
     let userContent = input;
-    if (input.startsWith("/skill:")) {
-      const firstSpace = input.indexOf(" ");
-      const skillName =
-        firstSpace === -1
-          ? input.slice("/skill:".length)
-          : input.slice("/skill:".length, firstSpace);
-      const userPrompt = firstSpace === -1 ? "" : input.slice(firstSpace + 1);
-      const skill = skills.find((s) => s.name === skillName);
-      if (!skill) {
-        process.stdout.write(pc.red(`Unknown skill: ${skillName}. Try /skills.\n`));
+    const invocation = parseSkillInvocation(input);
+    if (invocation) {
+      if (invocation.name.length === 0) {
+        process.stdout.write(pc.red("Usage: /skill:<name> <your request>. Try /skills.\n"));
         continue;
       }
-      userContent = applySkill(skill, userPrompt);
+      const skill = skills.find((s) => s.name === invocation.name);
+      if (!skill) {
+        process.stdout.write(pc.red(`Unknown skill: ${invocation.name}. Try /skills.\n`));
+        continue;
+      }
+      userContent = applySkill(skill, invocation.prompt);
     }
 
     // --- Agent turn ---
@@ -215,6 +223,10 @@ export async function runCLI(options: RunCLIOptions): Promise<void> {
     }
 
     // Persist anything the loop appended (assistant + tool_result messages).
+    // Contract with agentLoop: the returned `messages` array is the caller's
+    // array extended with new turns — the first `beforeCount` entries are
+    // identical to what we passed in. If that contract ever changes, this
+    // slice will silently skip or duplicate messages.
     for (let i = beforeCount; i < turnResult.messages.length; i++) {
       const m = turnResult.messages[i];
       if (m !== undefined) {
@@ -243,8 +255,11 @@ export async function runCLI(options: RunCLIOptions): Promise<void> {
 async function readLine(rl: ReadlineInterface): Promise<string | null> {
   try {
     return await rl.question(PROMPT);
-  } catch {
-    // Readline throws on close / EOF. Treat all failures as end-of-input.
+  } catch (error) {
+    // Readline throws on close / EOF — both of those end the REPL cleanly.
+    // Log anything else via the debug channel so real failures aren't
+    // completely silent when the user is running with `--debug`.
+    debug("cli", "readline ended", error);
     return null;
   }
 }

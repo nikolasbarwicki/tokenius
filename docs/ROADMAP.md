@@ -74,14 +74,15 @@ Trackable checklist derived from [PLAN.md](./PLAN.md). Each sprint produces a wo
 
 **Milestone:** Fully functional CLI. Can have real conversations with the agent.
 
-- [x] 6.1 CLI args parser in `src/cli/args.ts` — test: `--version`, `--help`, `--debug`
-- [x] 6.2 Streaming renderer in `src/cli/renderer.ts` — tool-aware arg preview + dispatch tests
-- [x] 6.3 Context window indicator — `formatContextIndicator` rendered on `turn_end`
-- [x] 6.4 Slash commands in `src/cli/commands.ts` — `/help /quit /sessions /load /cost /clear /skills`; `/model /usage /replay` deferred to Sprint 7
-- [x] 6.5 Debug mode in `src/debug.ts` — `--debug` flag or `DEBUG=tokenius`, stderr-only
-- [x] 6.6 Main CLI loop in `src/cli/index.ts` — readline REPL, Ctrl+C semantics, skill invocation, title generation, first-run `.gitignore` hint
+- [x] 6.1 CLI args parser in `src/cli/args.ts` — pure `parseArgs(argv)` + `-v`/`-h` short flags; `HELP_TEXT` renders from `COMMAND_HELP` (single source of truth)
+- [x] 6.2 Streaming renderer in `src/cli/renderer.ts` — FIFO pending-call queue, tool-aware `previewArgs`, injected `write` sink for tests
+- [x] 6.3 Context window indicator — `formatContextIndicator` rendered on `turn_end` (green <50%, yellow <80%, red beyond)
+- [x] 6.4 Slash commands in `src/cli/commands.ts` — `/help /quit /exit /sessions /load /cost /clear /skills`; `/clear` creates a new session (previous stays on disk); `/model /usage /replay` deferred to Sprint 7
+- [x] 6.5 Debug mode in `src/debug.ts` — `--debug` flag or `DEBUG=tokenius`, stderr-only; module-level `enableDebug()` so the flag toggles after argv parsing
+- [x] 6.6 Main CLI loop in `src/cli/index.ts` — readline REPL, Ctrl+C (abort turn / double-press to exit), `parseSkillInvocation` shared with router, title generation, first-run `.gitignore` hint
 - [x] 6.7 Bootstrap in `src/index.ts`
-- [x] 6.8 Startup banner (model, provider, cwd, session ID)
+- [x] 6.8 Startup banner (model, provider, cwd, session ID, context window, debug indicator)
+- [x] 6.9 Post-review hardening — SIGINT state fix, `readLine` debug-log on error, help-text dedupe, skill-invocation parser extraction, empty-name handling (see [SPRINT-6-SUMMARY.md](./SPRINT-6-SUMMARY.md))
 
 ## Sprint 7: Polish
 
