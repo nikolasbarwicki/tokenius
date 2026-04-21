@@ -51,25 +51,35 @@ export const bashTool: ToolDefinition<BashParams> = {
 
     const timeout = Math.min(params.timeout_ms ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS);
 
-    // Combine the external AbortSignal (Ctrl+C from agent loop) with our
-    // internal timeout into one signal for Bun.spawn.
-    const timeoutController = new AbortController();
-    const timer = setTimeout(() => timeoutController.abort("timeout"), timeout);
-    const composed = AbortSignal.any([context.signal, timeoutController.signal]);
-
+    let timedOut = false;
     let stdout = "";
     let stderr = "";
     let exitCode: number | null = null;
 
-    try {
-      const proc = Bun.spawn(["/bin/sh", "-c", params.command], {
-        cwd: context.cwd,
-        stdout: "pipe",
-        stderr: "pipe",
-        env: process.env,
-        signal: composed,
-      });
+    const proc = Bun.spawn(["/bin/sh", "-c", params.command], {
+      cwd: context.cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: process.env,
+    });
 
+    // Kill the child explicitly on abort/timeout. Relying on Bun.spawn's
+    // `signal` option is flaky on Linux + Bun 1.3.0: the process doesn't
+    // always terminate and the stream readers hang.
+    const onAbort = () => {
+      try {
+        proc.kill("SIGTERM");
+      } catch {
+        // process already gone
+      }
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      onAbort();
+    }, timeout);
+    context.signal.addEventListener("abort", onAbort, { once: true });
+
+    try {
       [stdout, stderr] = await Promise.all([
         new Response(proc.stdout).text(),
         new Response(proc.stderr).text(),
@@ -77,26 +87,19 @@ export const bashTool: ToolDefinition<BashParams> = {
       await proc.exited;
       exitCode = proc.exitCode;
     } catch (error) {
-      // Bun.spawn usually resolves even when aborted (the process is killed,
-      // exitCode becomes non-null). A throw here means something went wrong
-      // before spawn completed.
-      clearTimeout(timer);
-      if (context.signal.aborted) {
-        return { content: "bash aborted by user", isError: true };
-      }
       return {
         content: `bash error: ${error instanceof Error ? error.message : String(error)}`,
         isError: true,
       };
+    } finally {
+      clearTimeout(timer);
+      context.signal.removeEventListener("abort", onAbort);
     }
-    clearTimeout(timer);
 
-    // Check post-hoc: did we abort or time out? The spawn aborts silently on
-    // macOS (exitCode null or 143). Inspect the signals we controlled.
     if (context.signal.aborted) {
       return { content: "bash aborted by user", isError: true };
     }
-    if (timeoutController.signal.aborted) {
+    if (timedOut) {
       return {
         content: `[timed out after ${timeout}ms]\n${stdout}${stderr}`,
         isError: true,
