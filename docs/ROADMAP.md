@@ -74,14 +74,14 @@ Trackable checklist derived from [PLAN.md](./PLAN.md). Each sprint produces a wo
 
 **Milestone:** Fully functional CLI. Can have real conversations with the agent.
 
-- [ ] 6.1 CLI args parser in `src/cli/args.ts` — test: `--version`, `--help`, `--debug`
-- [ ] 6.2 Streaming renderer in `src/cli/renderer.ts`
-- [ ] 6.3 Context window indicator
-- [ ] 6.4 Slash commands in `src/cli/commands.ts`
-- [ ] 6.5 Debug mode in `src/debug.ts`
-- [ ] 6.6 Main CLI loop in `src/cli/index.ts`
-- [ ] 6.7 Bootstrap in `src/index.ts`
-- [ ] 6.8 Startup banner (model, provider, cwd, session ID)
+- [x] 6.1 CLI args parser in `src/cli/args.ts` — test: `--version`, `--help`, `--debug`
+- [x] 6.2 Streaming renderer in `src/cli/renderer.ts` — tool-aware arg preview + dispatch tests
+- [x] 6.3 Context window indicator — `formatContextIndicator` rendered on `turn_end`
+- [x] 6.4 Slash commands in `src/cli/commands.ts` — `/help /quit /sessions /load /cost /clear /skills`; `/model /usage /replay` deferred to Sprint 7
+- [x] 6.5 Debug mode in `src/debug.ts` — `--debug` flag or `DEBUG=tokenius`, stderr-only
+- [x] 6.6 Main CLI loop in `src/cli/index.ts` — readline REPL, Ctrl+C semantics, skill invocation, title generation, first-run `.gitignore` hint
+- [x] 6.7 Bootstrap in `src/index.ts`
+- [x] 6.8 Startup banner (model, provider, cwd, session ID)
 
 ## Sprint 7: Polish
 
